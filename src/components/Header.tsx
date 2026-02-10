@@ -63,9 +63,10 @@ export function Header() {
 
           {/* Navigation Links */}
           {session?.user && (
-            <nav className="hidden md:flex items-center gap-1">
+            <nav className="hidden md:flex items-center gap-1" aria-label="Main navigation">
               <Link
                 href="/digest"
+                aria-current={pathname === "/digest" ? "page" : undefined}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted ${
                   pathname === "/digest" ? "bg-muted text-foreground" : "text-muted-foreground"
                 }`}
@@ -75,6 +76,7 @@ export function Header() {
               </Link>
               <Link
                 href="/meetings"
+                aria-current={pathname?.startsWith("/meetings") ? "page" : undefined}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted ${
                   pathname?.startsWith("/meetings") ? "bg-muted text-foreground" : "text-muted-foreground"
                 }`}
@@ -92,7 +94,11 @@ export function Header() {
           {session?.user && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-10 gap-2 px-3">
+                <Button 
+                  variant="ghost" 
+                  className="relative h-10 gap-2 px-3"
+                  aria-label="User menu"
+                >
                   <Avatar className="h-8 w-8">
                     <AvatarImage src={session.user.image || undefined} alt={session.user.name || "User"} />
                     <AvatarFallback>{getInitials(session.user.name)}</AvatarFallback>
