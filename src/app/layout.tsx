@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { SessionProvider } from "@/components/SessionProvider";
 import { Header } from "@/components/Header";
-import { Toaster } from "sonner";
+import { Toaster } from "@/components/ui/toast";
 import "./globals.css";
 
 export const metadata: Metadata = {

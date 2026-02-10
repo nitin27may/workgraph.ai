@@ -774,6 +774,12 @@ export interface EmailMessage {
   isRead: boolean;
 }
 
+export interface RelatedEmailMessage extends EmailMessage {
+  relevanceScore?: number;
+  matchReason?: string;
+  fullBody?: string;
+}
+
 export interface EmailFolder {
   id: string;
   displayName: string;
@@ -2098,7 +2104,7 @@ export async function getMeetingPrepContext(
     };
 
     // Search emails by keywords from meeting subject
-    let relatedEmails: EmailMessage[] = [];
+    let relatedEmails: RelatedEmailMessage[] = [];
     
     if (topKeywords.length > 0) {
       try {

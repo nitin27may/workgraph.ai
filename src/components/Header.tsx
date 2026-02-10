@@ -2,8 +2,16 @@
 
 import { useSession, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, ChevronDown, BarChart3, ShieldCheck, Users, Settings, Calendar, Sparkles } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { LogOut, User, ChevronDown, BarChart3, Users, Settings, Calendar, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -14,21 +22,20 @@ const ADMIN_EMAIL = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "nitinkumar.singh@nbf
 export function Header() {
   const { data: session } = useSession();
   const pathname = usePathname();
-  const [showDropdown, setShowDropdown] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
   
   // Check if current user is admin
   const isAdmin = session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setShowDropdown(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  // Get user initials for avatar
+  const getInitials = (name: string | null | undefined) => {
+    if (!name) return "U";
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
 
   return (
     <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-sm">
@@ -83,107 +90,78 @@ export function Header() {
         <div className="flex items-center gap-3">
           <ThemeToggle />
           {session?.user && (
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => setShowDropdown(!showDropdown)}
-              className="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted"
-            >
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                {session.user.image ? (
-                  <img
-                    src={session.user.image}
-                    alt={session.user.name || "User"}
-                    className="h-8 w-8 rounded-full"
-                  />
-                ) : (
-                  <User className="h-4 w-4" />
-                )}
-              </div>
-              <div className="hidden text-left sm:block">
-                <p className="text-sm font-medium">{session.user.name}</p>
-                <p className="text-xs text-muted-foreground">{session.user.email}</p>
-              </div>
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-            </button>
-
-            {showDropdown && (
-              <div className="absolute right-0 mt-2 w-56 rounded-lg border bg-card p-1 shadow-lg">
-                <div className="border-b px-3 py-2 sm:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-10 gap-2 px-3">
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage src={session.user.image || undefined} alt={session.user.name || "User"} />
+                    <AvatarFallback>{getInitials(session.user.name)}</AvatarFallback>
+                  </Avatar>
+                  <div className="hidden text-left sm:block">
+                    <p className="text-sm font-medium leading-none">{session.user.name}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{session.user.email}</p>
+                  </div>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="sm:hidden">
                   <p className="text-sm font-medium">{session.user.name}</p>
-                  <p className="text-xs text-muted-foreground">{session.user.email}</p>
-                </div>
+                  <p className="text-xs text-muted-foreground font-normal">{session.user.email}</p>
+                </DropdownMenuLabel>
                 
                 {/* Mobile navigation */}
                 <div className="md:hidden">
-                  <Link
-                    href="/digest"
-                    onClick={() => setShowDropdown(false)}
-                    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted ${
-                      pathname === "/digest" ? "bg-muted font-medium" : ""
-                    }`}
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    Daily Digest
-                  </Link>
-                  <Link
-                    href="/meetings"
-                    onClick={() => setShowDropdown(false)}
-                    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted ${
-                      pathname?.startsWith("/meetings") ? "bg-muted font-medium" : ""
-                    }`}
-                  >
-                    <Calendar className="h-4 w-4" />
-                    Meetings
-                  </Link>
-                  <div className="my-1 border-b" />
+                  <DropdownMenuItem asChild>
+                    <Link href="/digest" className="flex items-center gap-2 cursor-pointer">
+                      <Sparkles className="h-4 w-4" />
+                      Daily Digest
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/meetings" className="flex items-center gap-2 cursor-pointer">
+                      <Calendar className="h-4 w-4" />
+                      Meetings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                 </div>
 
-                <Link
-                  href="/settings"
-                  onClick={() => setShowDropdown(false)}
-                  className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted ${
-                    pathname === "/settings" ? "bg-muted font-medium" : ""
-                  }`}
-                >
-                  <Settings className="h-4 w-4" />
-                  Settings
-                </Link>
+                <DropdownMenuItem asChild>
+                  <Link href="/settings" className="flex items-center gap-2 cursor-pointer">
+                    <Settings className="h-4 w-4" />
+                    Settings
+                  </Link>
+                </DropdownMenuItem>
+                
                 {isAdmin && (
                   <>
-                    <div className="my-1 border-b" />
-                    <Link
-                      href="/usage"
-                      onClick={() => setShowDropdown(false)}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted ${
-                        pathname === "/usage" ? "bg-muted font-medium" : ""
-                      }`}
-                    >
-                      <BarChart3 className="h-4 w-4" />
-                      Usage Dashboard
-                    </Link>
-                    <Link
-                      href="/admin/users"
-                      onClick={() => setShowDropdown(false)}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted ${
-                        pathname?.startsWith("/admin/users") ? "bg-muted font-medium" : ""
-                      }`}
-                    >
-                      <Users className="h-4 w-4" />
-                      Manage Users
-                    </Link>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link href="/usage" className="flex items-center gap-2 cursor-pointer">
+                        <BarChart3 className="h-4 w-4" />
+                        Usage Dashboard
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/admin/users" className="flex items-center gap-2 cursor-pointer">
+                        <Users className="h-4 w-4" />
+                        Manage Users
+                      </Link>
+                    </DropdownMenuItem>
                   </>
                 )}
-                <div className="my-1 border-b" />
-                <button
+                
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
                   onClick={() => signOut({ callbackUrl: "/" })}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-destructive hover:bg-muted"
+                  className="text-destructive focus:text-destructive cursor-pointer"
                 >
-                  <LogOut className="h-4 w-4" />
+                  <LogOut className="mr-2 h-4 w-4" />
                   Sign out
-                </button>
-              </div>
-            )}
-          </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </div>

@@ -6,7 +6,7 @@ import { setDefaultPrompt } from "@/lib/db";
 // POST /api/prompts/[id]/set-default - Set a prompt as default
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authOptions);
 
@@ -15,7 +15,8 @@ export async function POST(
   }
 
   try {
-    const id = parseInt(params.id);
+    const { id: idParam } = await params;
+    const id = parseInt(idParam);
     if (isNaN(id)) {
       return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
     }
