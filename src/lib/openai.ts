@@ -9,16 +9,24 @@ import {
   TEMPERATURE_SUMMARIZE,
   TEMPERATURE_PREP,
 } from "./constants";
+import { withRetry } from "./openai-retry";
 
 // Custom agent for corporate proxies with self-signed certs
-const agent = new https.Agent({ rejectUnauthorized: false });
+export const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
-const client = new AzureOpenAI({
-  apiKey: process.env.AZURE_OPENAI_KEY!,
-  endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
-  apiVersion: process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview",
-  httpAgent: agent,
-} as ConstructorParameters<typeof AzureOpenAI>[0] & { httpAgent: https.Agent });
+let _client: AzureOpenAI | null = null;
+
+export function getOpenAIClient(): AzureOpenAI {
+  if (!_client) {
+    _client = new AzureOpenAI({
+      apiKey: process.env.AZURE_OPENAI_KEY!,
+      endpoint: process.env.AZURE_OPENAI_ENDPOINT!,
+      apiVersion: process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview",
+      httpAgent: httpsAgent,
+    } as ConstructorParameters<typeof AzureOpenAI>[0] & { httpAgent: https.Agent });
+  }
+  return _client;
+}
 
 function calculateMeetingDuration(startDateTime: string, endDateTime?: string): number | null {
   if (!startDateTime || !endDateTime) return null;
@@ -103,16 +111,18 @@ Transcript:
 
   try {
     const model = process.env.AZURE_OPENAI_DEPLOYMENT!;
-    const response = await client.chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: TEMPERATURE_SUMMARIZE,
-      max_tokens: MAX_TOKENS_SUMMARIZE,
-      response_format: { type: "json_object" },
-    });
+    const response = await withRetry(() =>
+      getOpenAIClient().chat.completions.create({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: TEMPERATURE_SUMMARIZE,
+        max_tokens: MAX_TOKENS_SUMMARIZE,
+        response_format: { type: "json_object" },
+      })
+    );
 
     const content = response.choices[0].message.content;
     if (!content) {
@@ -209,16 +219,18 @@ ${emailContent}`;
 
   try {
     const model = process.env.AZURE_OPENAI_DEPLOYMENT!;
-    const response = await client.chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: TEMPERATURE_SUMMARIZE,
-      max_tokens: MAX_TOKENS_EMAIL,
-      response_format: { type: "json_object" },
-    });
+    const response = await withRetry(() =>
+      getOpenAIClient().chat.completions.create({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: TEMPERATURE_SUMMARIZE,
+        max_tokens: MAX_TOKENS_EMAIL,
+        response_format: { type: "json_object" },
+      })
+    );
 
     const content = response.choices[0].message.content;
     if (!content) {
@@ -318,15 +330,17 @@ Create a comprehensive preparation brief that helps the attendee walk into this 
 
   try {
     const model = process.env.AZURE_OPENAI_DEPLOYMENT!;
-    const response = await client.chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: TEMPERATURE_PREP,
-      max_tokens: MAX_TOKENS_PREP,
-    });
+    const response = await withRetry(() =>
+      getOpenAIClient().chat.completions.create({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: TEMPERATURE_PREP,
+        max_tokens: MAX_TOKENS_PREP,
+      })
+    );
 
     const content = response.choices[0].message.content;
     if (!content) {

@@ -79,6 +79,7 @@ export default function MeetingsPage() {
   const [expandedSummary, setExpandedSummary] = useState<string | null>(null);
   const [summaries, setSummaries] = useState<Record<string, MeetingSummary>>({});
   const [loadingSummary, setLoadingSummary] = useState<string | null>(null);
+  const [streamingText, setStreamingText] = useState<Record<string, string>>({});
   const [copiedSummary, setCopiedSummary] = useState<string | null>(null);
 
   // Task creation state
@@ -160,12 +161,13 @@ export default function MeetingsPage() {
       return;
     }
     
-    // Generate new summary
+    // Generate new summary via SSE stream
     setLoadingSummary(meetingKey);
     setExpandedSummary(meetingKey);
-    
+    setStreamingText(prev => ({ ...prev, [meetingKey]: "" }));
+
     try {
-      const response = await fetch("/api/summarize", {
+      const response = await fetch("/api/summarize/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -180,10 +182,57 @@ export default function MeetingsPage() {
         throw new Error("Failed to generate summary");
       }
 
-      const summaryData = await response.json();
-      setSummaries(prev => ({ ...prev, [meetingKey]: summaryData }));
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let eventType = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7).trim();
+          } else if (line.startsWith("data: ") && eventType) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (eventType === "summary") {
+                setStreamingText(prev => ({
+                  ...prev,
+                  [meetingKey]: (prev[meetingKey] || "") + data.delta,
+                }));
+              } else if (eventType === "structured") {
+                setSummaries(prev => ({ ...prev, [meetingKey]: data as MeetingSummary }));
+                setStreamingText(prev => {
+                  const next = { ...prev };
+                  delete next[meetingKey];
+                  return next;
+                });
+              } else if (eventType === "error") {
+                throw new Error(data.message);
+              }
+            } catch (e) {
+              if (e instanceof SyntaxError) continue;
+              throw e;
+            }
+            eventType = "";
+          }
+        }
+      }
     } catch (error) {
       console.error("Error generating summary:", error);
+      setStreamingText(prev => {
+        const next = { ...prev };
+        delete next[meetingKey];
+        return next;
+      });
       setExpandedSummary(null);
     } finally {
       setLoadingSummary(null);
@@ -758,7 +807,7 @@ export default function MeetingsPage() {
                     {/* Expandable Summary Section */}
                     {isExpanded && (
                       <div className="mt-4 rounded-lg border bg-gradient-to-br from-muted/40 to-muted/60 p-5 shadow-inner">
-                        {isLoadingSummary ? (
+                        {isLoadingSummary && !streamingText[meetingKey] ? (
                           <div className="space-y-3">
                             <div className="flex items-center gap-2">
                               <Loader2 className="h-4 w-4 animate-spin text-primary" />
@@ -769,6 +818,19 @@ export default function MeetingsPage() {
                             <Skeleton className="h-4 w-full" />
                             <Skeleton className="h-4 w-[90%]" />
                             <Skeleton className="h-4 w-[85%]" />
+                          </div>
+                        ) : isLoadingSummary && streamingText[meetingKey] ? (
+                          <div className="space-y-4">
+                            <div>
+                              <div className="flex items-center gap-2 mb-2">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                                <span className="text-xs text-muted-foreground">Generating...</span>
+                              </div>
+                              <p className="text-sm leading-relaxed text-foreground">
+                                {streamingText[meetingKey]}
+                                <span className="inline-block w-1.5 h-4 bg-primary/60 animate-pulse ml-0.5 align-text-bottom" />
+                              </p>
+                            </div>
                           </div>
                         ) : summary ? (
                           <div className="space-y-4">

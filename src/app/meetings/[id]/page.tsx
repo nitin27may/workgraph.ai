@@ -101,6 +101,7 @@ export default function MeetingDetailsPage() {
   // Summary state
   const [summary, setSummary] = useState<MeetingSummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  const [streamingText, setStreamingText] = useState<string>("");
   const [summaryCopied, setSummaryCopied] = useState(false);
 
   // Preparation brief state
@@ -278,8 +279,10 @@ export default function MeetingDetailsPage() {
     if (!meeting) return;
 
     setLoadingSummary(true);
+    setStreamingText("");
+
     try {
-      const response = await fetch("/api/summarize", {
+      const response = await fetch("/api/summarize/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -294,10 +297,46 @@ export default function MeetingDetailsPage() {
         throw new Error("Failed to generate summary");
       }
 
-      const summaryData = await response.json();
-      setSummary(summaryData);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let eventType = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7).trim();
+          } else if (line.startsWith("data: ") && eventType) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (eventType === "summary") {
+                setStreamingText(prev => prev + data.delta);
+              } else if (eventType === "structured") {
+                setSummary(data as MeetingSummary);
+                setStreamingText("");
+              } else if (eventType === "error") {
+                throw new Error(data.message);
+              }
+            } catch (e) {
+              if (e instanceof SyntaxError) continue;
+              throw e;
+            }
+            eventType = "";
+          }
+        }
+      }
     } catch (error) {
       console.error("Error generating summary:", error);
+      setStreamingText("");
       toast.error("Failed to generate summary. Please try again.");
     } finally {
       setLoadingSummary(false);
@@ -1181,53 +1220,62 @@ export default function MeetingDetailsPage() {
                       <div>
                         <p className="font-medium">Generating summary...</p>
                         <p className="text-sm text-muted-foreground">
-                          Analyzing transcript and extracting key insights
+                          {streamingText ? "Streaming response..." : "Analyzing transcript and extracting key insights"}
                         </p>
                       </div>
                     </div>
 
-                    <div className="space-y-6">
-                      <div className="space-y-2">
-                        <Skeleton className="h-4 w-full" />
-                        <Skeleton className="h-4 w-[95%]" />
-                        <Skeleton className="h-4 w-[90%]" />
-                        <Skeleton className="h-4 w-[85%]" />
+                    {streamingText ? (
+                      <div>
+                        <p className="text-sm leading-relaxed">
+                          {streamingText}
+                          <span className="inline-block w-1.5 h-4 bg-primary/60 animate-pulse ml-0.5 align-text-bottom" />
+                        </p>
                       </div>
-
-                      <Separator />
-
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Skeleton className="h-4 w-4 rounded-full" />
-                          <Skeleton className="h-4 w-32" />
+                    ) : (
+                      <div className="space-y-6">
+                        <div className="space-y-2">
+                          <Skeleton className="h-4 w-full" />
+                          <Skeleton className="h-4 w-[95%]" />
+                          <Skeleton className="h-4 w-[90%]" />
+                          <Skeleton className="h-4 w-[85%]" />
                         </div>
-                        <Skeleton className="h-3 w-[80%]" />
-                        <Skeleton className="h-3 w-[70%]" />
-                        <Skeleton className="h-3 w-[75%]" />
-                      </div>
 
-                      <Separator />
+                        <Separator />
 
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Skeleton className="h-4 w-4 rounded-full" />
-                          <Skeleton className="h-4 w-28" />
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="h-4 w-4 rounded-full" />
+                            <Skeleton className="h-4 w-32" />
+                          </div>
+                          <Skeleton className="h-3 w-[80%]" />
+                          <Skeleton className="h-3 w-[70%]" />
+                          <Skeleton className="h-3 w-[75%]" />
                         </div>
-                        <Skeleton className="h-12 w-full rounded-md" />
-                        <Skeleton className="h-12 w-full rounded-md" />
-                      </div>
 
-                      <Separator />
+                        <Separator />
 
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Skeleton className="h-4 w-4 rounded-full" />
-                          <Skeleton className="h-4 w-24" />
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="h-4 w-4 rounded-full" />
+                            <Skeleton className="h-4 w-28" />
+                          </div>
+                          <Skeleton className="h-12 w-full rounded-md" />
+                          <Skeleton className="h-12 w-full rounded-md" />
                         </div>
-                        <Skeleton className="h-3 w-[60%]" />
-                        <Skeleton className="h-3 w-[65%]" />
+
+                        <Separator />
+
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="h-4 w-4 rounded-full" />
+                            <Skeleton className="h-4 w-24" />
+                          </div>
+                          <Skeleton className="h-3 w-[60%]" />
+                          <Skeleton className="h-3 w-[65%]" />
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 )}
 
