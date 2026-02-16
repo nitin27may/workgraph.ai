@@ -140,8 +140,10 @@ body {
   }
 }
 
-/* Smooth transitions */
-* {
+/* Smooth transitions for interactive elements */
+a, button, input, select, textarea,
+[role="button"], [role="tab"], [role="checkbox"],
+.transition-colors {
   @apply transition-colors duration-200;
 }
 

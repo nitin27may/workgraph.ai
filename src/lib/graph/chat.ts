@@ -119,7 +119,7 @@ export async function getChatMembers(
   try {
     const response = await client.api(`/chats/${chatId}/members`).get();
 
-    return (response.value || []).map((member: any) => ({
+    return (response.value || []).map((member: { id: string; displayName: string; userId: string; email: string; roles?: string[] }) => ({
       id: member.id,
       displayName: member.displayName,
       userId: member.userId,
@@ -137,37 +137,37 @@ export async function getRecentChatsWithPeople(
   accessToken: string,
   emailAddresses: string[]
 ): Promise<TeamsChat[]> {
-  const client = getGraphClient(accessToken);
-
   try {
     if (emailAddresses.length === 0) {
       return [];
     }
 
-    // Get all recent chats
     const allChats = await getChats(accessToken, 50);
+    const targetEmails = new Set(emailAddresses.map((e) => e.toLowerCase()));
 
-    // Filter chats that include the specified people
+    // Batch member lookups with concurrency limit
+    const BATCH_SIZE = 10;
     const relevantChats: TeamsChat[] = [];
 
-    for (const chat of allChats) {
-      try {
-        const members = await getChatMembers(accessToken, chat.id);
-        const memberEmails = members.map((m) => m.email?.toLowerCase()).filter(Boolean);
+    for (let i = 0; i < allChats.length && relevantChats.length < 10; i += BATCH_SIZE) {
+      const batch = allChats.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(async (chat) => {
+          try {
+            const members = await getChatMembers(accessToken, chat.id);
+            const memberEmails = members.map((m) => m.email?.toLowerCase()).filter((e): e is string => !!e);
+            const hasRelevantMember = memberEmails.some((email) => targetEmails.has(email));
+            return hasRelevantMember ? chat : null;
+          } catch {
+            return null;
+          }
+        })
+      );
 
-        // Check if any of the target email addresses are in this chat
-        const hasRelevantMember = emailAddresses.some((email) =>
-          memberEmails.includes(email.toLowerCase())
-        );
-
-        if (hasRelevantMember) {
+      for (const chat of results) {
+        if (chat && relevantChats.length < 10) {
           relevantChats.push(chat);
         }
-
-        if (relevantChats.length >= 10) break; // Limit to 10 chats
-      } catch (err) {
-        // Skip chats we can't access
-        continue;
       }
     }
 

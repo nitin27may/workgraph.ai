@@ -11,33 +11,32 @@ async function queryAllTaskLists(
   select?: string
 ): Promise<TodoTask[]> {
   const lists = await getTaskLists(accessToken);
-  const allTasks: TodoTask[] = [];
 
-  for (const list of lists) {
-    try {
-      let query = client
-        .api(`/me/todo/lists/${list.id}/tasks`)
-        .filter(filter);
+  const results = await Promise.all(
+    lists.map(async (list) => {
+      try {
+        let query = client
+          .api(`/me/todo/lists/${list.id}/tasks`)
+          .filter(filter);
 
-      if (select) {
-        query = query.select(select);
-      }
+        if (select) {
+          query = query.select(select);
+        }
 
-      const response = await query.get();
-      const tasks = response.value || [];
-      allTasks.push(
-        ...tasks.map((t: TodoTask) => ({
+        const response = await query.get();
+        return (response.value || []).map((t: TodoTask) => ({
           ...t,
           listName: list.displayName,
           listId: list.id,
-        }))
-      );
-    } catch (err) {
-      console.error(`Error fetching tasks for list ${list.displayName}:`, err);
-    }
-  }
+        }));
+      } catch (err) {
+        console.error(`Error fetching tasks for list ${list.displayName}:`, err);
+        return [];
+      }
+    })
+  );
 
-  return allTasks;
+  return results.flat();
 }
 
 // Get all task lists for the user
@@ -95,27 +94,23 @@ export async function getAllTasks(accessToken: string): Promise<{ list: TodoTask
 
   try {
     const lists = await getTaskLists(accessToken);
-    const results: { list: TodoTaskList; tasks: TodoTask[] }[] = [];
 
-    for (const list of lists) {
-      try {
-        const response = await client
-          .api(`/me/todo/lists/${list.id}/tasks`)
-          .orderby("createdDateTime desc")
-          .top(DEFAULT_MAX_RESULTS)
-          .get();
+    return await Promise.all(
+      lists.map(async (list) => {
+        try {
+          const response = await client
+            .api(`/me/todo/lists/${list.id}/tasks`)
+            .orderby("createdDateTime desc")
+            .top(DEFAULT_MAX_RESULTS)
+            .get();
 
-        results.push({
-          list,
-          tasks: response.value || [],
-        });
-      } catch (err) {
-        console.error(`Error fetching tasks for list ${list.displayName}:`, err);
-        results.push({ list, tasks: [] });
-      }
-    }
-
-    return results;
+          return { list, tasks: response.value || [] };
+        } catch (err) {
+          console.error(`Error fetching tasks for list ${list.displayName}:`, err);
+          return { list, tasks: [] };
+        }
+      })
+    );
   } catch (error) {
     console.error("Error fetching all tasks:", error);
     throw new Error("Failed to fetch all tasks");
@@ -252,30 +247,29 @@ export async function getTasksDueToday(
 
   try {
     const lists = await getTaskLists(accessToken);
-    const results: { list: TodoTaskList; tasks: TodoTask[] }[] = [];
-
     const { start: todayStart, end: todayEnd } = getTodayDateRange();
 
-    for (const list of lists) {
-      try {
-        const response = await client
-          .api(`/me/todo/lists/${list.id}/tasks`)
-          .filter(
-            `status ne 'completed' and dueDateTime/dateTime ge '${todayStart.toISOString()}' and dueDateTime/dateTime le '${todayEnd.toISOString()}'`
-          )
-          .orderby("dueDateTime/dateTime asc")
-          .get();
+    const results = await Promise.all(
+      lists.map(async (list) => {
+        try {
+          const response = await client
+            .api(`/me/todo/lists/${list.id}/tasks`)
+            .filter(
+              `status ne 'completed' and dueDateTime/dateTime ge '${todayStart.toISOString()}' and dueDateTime/dateTime le '${todayEnd.toISOString()}'`
+            )
+            .orderby("dueDateTime/dateTime asc")
+            .get();
 
-        const tasks = response.value || [];
-        if (tasks.length > 0) {
-          results.push({ list, tasks });
+          const tasks = response.value || [];
+          return tasks.length > 0 ? { list, tasks } : null;
+        } catch (err) {
+          console.error(`Error fetching tasks due today for list ${list.displayName}:`, err);
+          return null;
         }
-      } catch (err) {
-        console.error(`Error fetching tasks due today for list ${list.displayName}:`, err);
-      }
-    }
+      })
+    );
 
-    return results;
+    return results.filter((r): r is { list: TodoTaskList; tasks: TodoTask[] } => r !== null);
   } catch (error) {
     console.error("Error fetching tasks due today:", error);
     throw new Error("Failed to fetch tasks due today");
@@ -290,29 +284,28 @@ export async function getOverdueTasks(
 
   try {
     const lists = await getTaskLists(accessToken);
-    const results: { list: TodoTaskList; tasks: TodoTask[] }[] = [];
-
     const now = new Date();
     now.setHours(0, 0, 0, 0);
 
-    for (const list of lists) {
-      try {
-        const response = await client
-          .api(`/me/todo/lists/${list.id}/tasks`)
-          .filter(`status ne 'completed' and dueDateTime/dateTime lt '${now.toISOString()}'`)
-          .orderby("dueDateTime/dateTime asc")
-          .get();
+    const results = await Promise.all(
+      lists.map(async (list) => {
+        try {
+          const response = await client
+            .api(`/me/todo/lists/${list.id}/tasks`)
+            .filter(`status ne 'completed' and dueDateTime/dateTime lt '${now.toISOString()}'`)
+            .orderby("dueDateTime/dateTime asc")
+            .get();
 
-        const tasks = response.value || [];
-        if (tasks.length > 0) {
-          results.push({ list, tasks });
+          const tasks = response.value || [];
+          return tasks.length > 0 ? { list, tasks } : null;
+        } catch (err) {
+          console.error(`Error fetching overdue tasks for list ${list.displayName}:`, err);
+          return null;
         }
-      } catch (err) {
-        console.error(`Error fetching overdue tasks for list ${list.displayName}:`, err);
-      }
-    }
+      })
+    );
 
-    return results;
+    return results.filter((r): r is { list: TodoTaskList; tasks: TodoTask[] } => r !== null);
   } catch (error) {
     console.error("Error fetching overdue tasks:", error);
     throw new Error("Failed to fetch overdue tasks");

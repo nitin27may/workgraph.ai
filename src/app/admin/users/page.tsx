@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Users,
   UserPlus,
@@ -26,6 +27,7 @@ import {
   Mail,
   Calendar,
 } from "lucide-react";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface AuthorizedUser {
   id: number;
@@ -55,6 +57,7 @@ export default function AdminUsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<{ message: string; errors: string[] } | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -162,7 +165,13 @@ export default function AdminUsersPage() {
   }
 
   async function handleDeleteUser(id: number, email: string) {
-    if (!confirm(`Are you sure you want to delete ${email}?`)) return;
+    const confirmed = await confirm({
+      title: "Delete User",
+      description: `Are you sure you want to delete ${email}?`,
+      confirmLabel: "Delete",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
 
     try {
       const response = await fetch(`/api/users?id=${id}`, {
@@ -276,6 +285,8 @@ export default function AdminUsersPage() {
   const adminCount = users.filter((u) => u.role === "admin").length;
 
   return (
+    <>
+    <ConfirmDialog />
     <div className="container mx-auto p-6 max-w-5xl space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -368,7 +379,7 @@ export default function AdminUsersPage() {
           <AlertCircle className="w-4 h-4" />
           <AlertDescription className="flex items-center justify-between">
             <span>{error}</span>
-            <button onClick={() => setError(null)} className="ml-auto hover:text-destructive/80">×</button>
+            <button onClick={() => setError(null)} aria-label="Dismiss" className="ml-auto hover:text-destructive/80">×</button>
           </AlertDescription>
         </Alert>
       )}
@@ -378,7 +389,7 @@ export default function AdminUsersPage() {
           <CheckCircle className="w-4 h-4" />
           <AlertDescription className="flex items-center justify-between">
             <span>{success}</span>
-            <button onClick={() => setSuccess(null)} className="ml-auto hover:text-success/80">×</button>
+            <button onClick={() => setSuccess(null)} aria-label="Dismiss" className="ml-auto hover:text-success/80">×</button>
           </AlertDescription>
         </Alert>
       )}
@@ -413,10 +424,11 @@ export default function AdminUsersPage() {
         <CardContent>
           <form onSubmit={handleAddUser} className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1">
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              <Label htmlFor="add-user-email" className="text-xs font-medium text-muted-foreground mb-1 block">
                 Email <span className="text-destructive">*</span>
-              </label>
+              </Label>
               <Input
+                id="add-user-email"
                 type="email"
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
@@ -426,10 +438,11 @@ export default function AdminUsersPage() {
               />
             </div>
             <div className="flex-1">
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              <Label htmlFor="add-user-name" className="text-xs font-medium text-muted-foreground mb-1 block">
                 Name
-              </label>
+              </Label>
               <Input
+                id="add-user-name"
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -438,10 +451,11 @@ export default function AdminUsersPage() {
               />
             </div>
             <div className="w-full sm:w-28">
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              <Label htmlFor="add-user-role" className="text-xs font-medium text-muted-foreground mb-1 block">
                 Role
-              </label>
+              </Label>
               <select
+                id="add-user-role"
                 value={newRole}
                 onChange={(e) => setNewRole(e.target.value as "admin" | "user")}
                 className="w-full h-9 px-2 text-sm border border-input rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring/20"
@@ -567,5 +581,6 @@ export default function AdminUsersPage() {
         CSV format: email, name (optional), role (optional: user/admin)
       </p>
     </div>
+    </>
   );
 }

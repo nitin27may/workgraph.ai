@@ -15,6 +15,7 @@ import { LogOut, User, ChevronDown, BarChart3, Users, Settings, Calendar, Sparkl
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { getInitials } from "@/lib/utils";
 
 // Admin email constant - must match the one in db.ts
 const ADMIN_EMAIL = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "";
@@ -22,20 +23,9 @@ const ADMIN_EMAIL = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "";
 export function Header() {
   const { data: session } = useSession();
   const pathname = usePathname();
-  
+
   // Check if current user is admin
   const isAdmin = session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-
-  // Get user initials for avatar
-  const getInitials = (name: string | null | undefined) => {
-    if (!name) return "U";
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-  };
 
   return (
     <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-sm">

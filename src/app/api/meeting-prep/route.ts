@@ -39,19 +39,21 @@ export const GET = withAuth(async (request: NextRequest, session) => {
         }
 
         return NextResponse.json(prepContext);
-      } catch (error: any) {
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        const statusCode = (error as { statusCode?: number })?.statusCode;
         console.error("Error fetching meeting prep context:", {
           meetingId,
-          error: error?.message,
-          statusCode: error?.statusCode,
+          error: message,
+          statusCode,
         });
 
         return NextResponse.json(
           {
             error: "Failed to fetch meeting preparation context",
-            details: error?.message,
+            details: message,
           },
-          { status: error?.statusCode || 500 }
+          { status: statusCode || 500 }
         );
       }
     }

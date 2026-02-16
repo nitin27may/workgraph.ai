@@ -23,7 +23,7 @@ export interface MeetingPrep {
   meeting: Meeting;
   context: {
     relatedEmails: (EmailMessage & { fullBody?: string; relevanceScore?: number; matchReason?: string })[];
-    relatedMeetings: (Meeting & { transcript?: string; summary?: any; relevanceScore?: number })[];
+    relatedMeetings: (Meeting & { transcript?: string; summary?: Record<string, unknown>; relevanceScore?: number })[];
     recentChats: TeamsChat[];
     attendeeInfo: PersonSearchResult[];
   };
@@ -110,8 +110,8 @@ export async function getMeetingPrepContext(
     };
 
     // Get attendee email addresses
-    const attendeeEmails = meeting.attendees
-      ? meeting.attendees.map((a: any) => a.emailAddress.address).filter(Boolean)
+    const attendeeEmails: string[] = meeting.attendees
+      ? meeting.attendees.map((a: { emailAddress: { address: string } }) => a.emailAddress.address).filter(Boolean)
       : [];
 
     const currentMeetingKeywords = extractKeywords(meeting.subject || '');
@@ -250,19 +250,18 @@ export async function getMeetingPrepContext(
 
     const relatedMeetingsWithTranscripts = meetingsWithTranscripts;
 
-    // Get attendee info
-    const attendeeInfo: PersonSearchResult[] = [];
-    for (const email of attendeeEmails.slice(0, MAX_PREP_ATTENDEES)) {
-      try {
-        const people = await searchPeople(accessToken, email, 1);
-        if (people.length > 0) {
-          attendeeInfo.push(people[0]);
+    // Get attendee info in parallel
+    const attendeeResults = await Promise.all(
+      attendeeEmails.slice(0, MAX_PREP_ATTENDEES).map(async (email) => {
+        try {
+          const people = await searchPeople(accessToken, email, 1);
+          return people.length > 0 ? people[0] : null;
+        } catch {
+          return null;
         }
-      } catch (err) {
-        // Skip if can't find person
-        continue;
-      }
-    }
+      })
+    );
+    const attendeeInfo = attendeeResults.filter((p): p is PersonSearchResult => p !== null);
 
     // Calculate confidence based on related content found
     const totalRelatedCount = relatedEmails.length + relatedMeetings.length;

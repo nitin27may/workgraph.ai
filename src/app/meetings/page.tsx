@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +51,8 @@ import {
   CheckSquare,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
+import { parseUTCDateTime, formatMeetingDateTime } from "@/lib/dateUtils";
+import { formatSummaryAsMarkdown, formatSummaryAsHtml } from "@/lib/summaryUtils";
 
 export default function MeetingsPage() {
   const { data: session, status } = useSession();
@@ -91,6 +93,8 @@ export default function MeetingsPage() {
   const [peopleSearchResults, setPeopleSearchResults] = useState<Array<{ id: string; displayName: string; emailAddress: string; jobTitle?: string }>>([]);
   const [searchingPeople, setSearchingPeople] = useState(false);
   const [showPeopleDropdown, setShowPeopleDropdown] = useState(false);
+  const emailDebounceRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const summaryEmailDebounceRef = useRef<ReturnType<typeof setTimeout>>(null);
   const [sharingInProgress, setSharingInProgress] = useState(false);
   
   // Share summary state
@@ -105,9 +109,10 @@ export default function MeetingsPage() {
   const [includeAllAttendees, setIncludeAllAttendees] = useState(false);
 
   // Filter meetings based on transcript filter
-  const filteredMeetings = showOnlyWithTranscript
-    ? meetings.filter((m) => m.hasTranscript)
-    : meetings;
+  const filteredMeetings = useMemo(
+    () => showOnlyWithTranscript ? meetings.filter((m) => m.hasTranscript) : meetings,
+    [meetings, showOnlyWithTranscript]
+  );
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -186,26 +191,7 @@ export default function MeetingsPage() {
   }
 
   function copySummary(meetingKey: string, summary: MeetingSummary) {
-    const text = `
-# ${summary.subject}
-Date: ${new Date(summary.date).toLocaleDateString()}
-
-## Summary
-${summary.fullSummary}
-
-## Key Decisions
-${summary.keyDecisions.map((d) => `- ${d}`).join("\n")}
-
-## Action Items
-${summary.actionItems.map((a) => `- ${a.owner}: ${a.task}${a.deadline ? ` (Due: ${a.deadline})` : ""}`).join("\n")}
-
-## Key Metrics
-${summary.metrics.map((m) => `- ${m}`).join("\n")}
-
-## Next Steps
-${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
-    `.trim();
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(formatSummaryAsMarkdown(summary));
     setCopiedSummary(meetingKey);
     setTimeout(() => setCopiedSummary(null), 2000);
   }
@@ -345,11 +331,10 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
   // Handle email input change with debounced search
   function handleEmailInputChange(value: string) {
     setShareEmail(value);
-    // Debounce the search
-    const timeoutId = setTimeout(() => {
+    if (emailDebounceRef.current) clearTimeout(emailDebounceRef.current);
+    emailDebounceRef.current = setTimeout(() => {
       searchPeople(value);
     }, 300);
-    return () => clearTimeout(timeoutId);
   }
 
   // Select a person from the autocomplete dropdown
@@ -385,10 +370,10 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
   // Handle summary email input change
   function handleSummaryEmailChange(value: string) {
     setShareSummaryEmail(value);
-    const timeoutId = setTimeout(() => {
+    if (summaryEmailDebounceRef.current) clearTimeout(summaryEmailDebounceRef.current);
+    summaryEmailDebounceRef.current = setTimeout(() => {
       searchSummaryPeople(value);
     }, 300);
-    return () => clearTimeout(timeoutId);
   }
 
   // Select a person for summary sharing
@@ -423,77 +408,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
       }
       
       // Format the summary as HTML email content with proper formatting
-      const summaryHtml = `
-<div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #333;">
-  <h1 style="color: #1a1a1a; border-bottom: 2px solid #0078d4; padding-bottom: 10px;">Meeting Summary</h1>
-  
-  <div style="background-color: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-    <h2 style="margin: 0 0 10px 0; color: #1a1a1a;">${summary.subject}</h2>
-    <p style="margin: 0; color: #666;"><strong>Date:</strong> ${new Date(summary.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-  </div>
-
-  <div style="margin-bottom: 25px;">
-    <h3 style="color: #0078d4; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Summary</h3>
-    <p style="line-height: 1.6; white-space: pre-wrap;">${summary.fullSummary}</p>
-  </div>
-
-  ${summary.keyDecisions.length > 0 ? `
-  <div style="margin-bottom: 25px;">
-    <h3 style="color: #0078d4; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Key Decisions</h3>
-    <ul style="line-height: 1.8; padding-left: 20px;">
-      ${summary.keyDecisions.map(d => `<li style="margin-bottom: 8px;">${d}</li>`).join('')}
-    </ul>
-  </div>
-  ` : ''}
-
-  ${summary.actionItems.length > 0 ? `
-  <div style="margin-bottom: 25px;">
-    <h3 style="color: #0078d4; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Action Items</h3>
-    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
-      <thead>
-        <tr style="background-color: #f0f0f0;">
-          <th style="text-align: left; padding: 10px; border: 1px solid #ddd; font-weight: 600;">Owner</th>
-          <th style="text-align: left; padding: 10px; border: 1px solid #ddd; font-weight: 600;">Task</th>
-          <th style="text-align: left; padding: 10px; border: 1px solid #ddd; font-weight: 600;">Due Date</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${summary.actionItems.map(a => `
-        <tr>
-          <td style="padding: 10px; border: 1px solid #ddd; font-weight: 500;">${a.owner}</td>
-          <td style="padding: 10px; border: 1px solid #ddd;">${a.task}</td>
-          <td style="padding: 10px; border: 1px solid #ddd;">${a.deadline || 'Not specified'}</td>
-        </tr>
-        `).join('')}
-      </tbody>
-    </table>
-  </div>
-  ` : ''}
-
-  ${summary.metrics.length > 0 ? `
-  <div style="margin-bottom: 25px;">
-    <h3 style="color: #0078d4; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Key Metrics</h3>
-    <ul style="line-height: 1.8; padding-left: 20px;">
-      ${summary.metrics.map(m => `<li style="margin-bottom: 8px;">${m}</li>`).join('')}
-    </ul>
-  </div>
-  ` : ''}
-
-  ${summary.nextSteps.length > 0 ? `
-  <div style="margin-bottom: 25px;">
-    <h3 style="color: #0078d4; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Next Steps</h3>
-    <ul style="line-height: 1.8; padding-left: 20px;">
-      ${summary.nextSteps.map(s => `<li style="margin-bottom: 8px;">${s}</li>`).join('')}
-    </ul>
-  </div>
-  ` : ''}
-
-  <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;" />
-  <p style="color: #888; font-size: 12px; text-align: center;">
-    <em>This summary was generated by the Meeting Summarizer app.</em>
-  </p>
-</div>
-      `.trim();
+      const summaryHtml = formatSummaryAsHtml(summary);
 
       const response = await fetch("/api/tasks/share", {
         method: "POST",
@@ -534,25 +449,6 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
     // Use onlineMeetingId as the route param (required for transcript API)
     const id = meeting.onlineMeetingId || meeting.id;
     router.push(`/meetings/${encodeURIComponent(id)}`);
-  }
-
-  // Parse datetime from Graph API - it comes in UTC without 'Z' suffix
-  function parseUTCDateTime(dateTimeString: string): Date {
-    const cleanedString = dateTimeString.replace(/\.\d+$/, ""); // Remove trailing decimals
-    return new Date(cleanedString + "Z"); // Add Z to parse as UTC, displays in local timezone
-  }
-
-  function formatMeetingDateTime(dateTimeString: string): string {
-    const date = parseUTCDateTime(dateTimeString);
-    return date.toLocaleString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
   }
 
   // Only show full-page spinner for auth loading
@@ -629,8 +525,9 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
           {/* Date Range Filter */}
           <div className="flex flex-wrap items-center gap-4 rounded-lg border bg-card/50 backdrop-blur-sm p-4 shadow-sm">
             <div className="flex items-center gap-2">
-              <label className="text-sm font-medium">From:</label>
+              <Label htmlFor="filter-start-date" className="text-sm font-medium">From:</Label>
               <input
+                id="filter-start-date"
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
@@ -638,8 +535,9 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
               />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-sm font-medium">To:</label>
+              <Label htmlFor="filter-end-date" className="text-sm font-medium">To:</Label>
               <input
+                id="filter-end-date"
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
@@ -1028,12 +926,22 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                                       {summary.actionItems.map((item, i) => {
                                         const isSelected = selectedActionItems[meetingKey]?.has(i);
                                         return (
-                                          <li 
-                                            key={i} 
+                                          <li
+                                            key={i}
+                                            role="checkbox"
+                                            aria-checked={isSelected}
+                                            tabIndex={0}
                                             className={`group rounded bg-background p-2 flex items-start gap-2 cursor-pointer hover:bg-muted transition-colors ${isSelected ? 'ring-1 ring-primary' : ''}`}
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               toggleActionItemSelection(meetingKey, i);
+                                            }}
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                toggleActionItemSelection(meetingKey, i);
+                                              }
                                             }}
                                           >
                                             <div className="mt-0.5">
@@ -1175,13 +1083,22 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                     
                     {/* Autocomplete Dropdown */}
                     {showPeopleDropdown && peopleSearchResults.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-lg">
+                      <div role="listbox" className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-lg">
                         <ul className="max-h-60 overflow-auto py-1">
                           {peopleSearchResults.map((person) => (
                             <li
                               key={person.id}
+                              role="option"
+                              aria-selected={shareEmail === person.emailAddress}
+                              tabIndex={0}
                               className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-muted transition-colors"
                               onClick={() => selectPerson(person)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  selectPerson(person);
+                                }
+                              }}
                             >
                               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium">
                                 {(person.displayName || person.emailAddress || '?').charAt(0).toUpperCase()}
@@ -1291,13 +1208,22 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                     
                     {/* Autocomplete Dropdown */}
                     {showSummaryPeopleDropdown && summaryPeopleResults.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-lg">
+                      <div role="listbox" className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-lg">
                         <ul className="max-h-60 overflow-auto py-1">
                           {summaryPeopleResults.map((person) => (
                             <li
                               key={person.id}
+                              role="option"
+                              aria-selected={shareSummaryEmail === person.emailAddress}
+                              tabIndex={0}
                               className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-muted transition-colors"
                               onClick={() => selectSummaryPerson(person)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  selectSummaryPerson(person);
+                                }
+                              }}
                             >
                               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium">
                                 {(person.displayName || person.emailAddress || '?').charAt(0).toUpperCase()}

@@ -271,7 +271,7 @@ export function saveUsageMetrics(metrics: SummarizationMetrics): UsageRecord {
     metrics.requestedByEmail ?? null
   );
   
-  db.close();
+
   
   return {
     id: result.lastInsertRowid as number,
@@ -298,7 +298,7 @@ export function getAllUsageRecords(): UsageRecord[] {
   const db = getDb();
   const stmt = db.prepare('SELECT * FROM usage ORDER BY createdAt DESC');
   const records = stmt.all() as UsageRecord[];
-  db.close();
+
   return records;
 }
 
@@ -330,7 +330,7 @@ export function getUsageStats(): {
     avgProcessingTimeMs: number;
   };
   
-  db.close();
+
   return stats;
 }
 
@@ -432,7 +432,7 @@ export function importUsageFromCsv(csvContent: string): { imported: number; erro
     }
   }
   
-  db.close();
+
   return { imported, errors };
 }
 
@@ -467,7 +467,7 @@ export function deleteUsageRecord(id: number): boolean {
   const db = getDb();
   const stmt = db.prepare('DELETE FROM usage WHERE id = ?');
   const result = stmt.run(id);
-  db.close();
+
   return result.changes > 0;
 }
 
@@ -475,7 +475,7 @@ export function clearAllUsage(): number {
   const db = getDb();
   const stmt = db.prepare('DELETE FROM usage');
   const result = stmt.run();
-  db.close();
+
   return result.changes;
 }
 
@@ -508,7 +508,7 @@ export function isUserAuthorized(email: string | null | undefined): { authorized
   
   const db = getDb();
   const user = db.prepare('SELECT * FROM authorized_users WHERE email = ? AND isActive = 1').get(email.toLowerCase()) as AuthorizedUser | undefined;
-  db.close();
+
   
   if (user) {
     return { authorized: true, user, isAdmin: user.role === 'admin' };
@@ -520,7 +520,7 @@ export function isUserAuthorized(email: string | null | undefined): { authorized
 export function getAllAuthorizedUsers(): AuthorizedUser[] {
   const db = getDb();
   const users = db.prepare('SELECT * FROM authorized_users ORDER BY createdAt DESC').all() as AuthorizedUser[];
-  db.close();
+
   return users;
 }
 
@@ -550,7 +550,7 @@ export function addAuthorizedUser(email: string, name: string | null, role: User
     createdBy,
   };
   
-  db.close();
+
   return user;
 }
 
@@ -574,14 +574,14 @@ export function updateAuthorizedUser(id: number, updates: { name?: string; role?
   }
   
   if (setClauses.length === 0) {
-    db.close();
+  
     return false;
   }
   
   values.push(id);
   const stmt = db.prepare(`UPDATE authorized_users SET ${setClauses.join(', ')} WHERE id = ?`);
   const result = stmt.run(...values);
-  db.close();
+
   
   return result.changes > 0;
 }
@@ -591,20 +591,20 @@ export function deleteAuthorizedUser(id: number): boolean {
   // Don't allow deleting the main admin
   const user = db.prepare('SELECT email FROM authorized_users WHERE id = ?').get(id) as { email: string } | undefined;
   if (user && isAdmin(user.email)) {
-    db.close();
+  
     return false; // Can't delete admin
   }
   
   const stmt = db.prepare('DELETE FROM authorized_users WHERE id = ?');
   const result = stmt.run(id);
-  db.close();
+
   return result.changes > 0;
 }
 
 export function getUserByEmail(email: string): AuthorizedUser | null {
   const db = getDb();
   const user = db.prepare('SELECT * FROM authorized_users WHERE email = ?').get(email.toLowerCase()) as AuthorizedUser | undefined;
-  db.close();
+
   return user || null;
 }
 
@@ -702,7 +702,7 @@ export function importUsersFromCsv(csvContent: string, importedBy: string): { im
     }
   }
   
-  db.close();
+
   return result;
 }
 
@@ -715,7 +715,7 @@ export function getUserPromptTemplates(userEmail: string): PromptTemplate[] {
     WHERE isGlobal = 1 OR createdBy = ?
     ORDER BY isGlobal DESC, isDefault DESC, name ASC
   `).all(userEmail) as PromptTemplate[];
-  db.close();
+
   return prompts.map(p => ({
     ...p,
     isDefault: !!p.isDefault,
@@ -734,7 +734,7 @@ export function getUserDefaultPrompt(userEmail: string): PromptTemplate | null {
   `).get(userEmail) as PromptTemplate | undefined;
   
   if (userDefault) {
-    db.close();
+  
     return { ...userDefault, isDefault: !!userDefault.isDefault, isGlobal: !!userDefault.isGlobal };
   }
   
@@ -745,7 +745,7 @@ export function getUserDefaultPrompt(userEmail: string): PromptTemplate | null {
     LIMIT 1
   `).get() as PromptTemplate | undefined;
   
-  db.close();
+
   
   if (globalDefault) {
     return { ...globalDefault, isDefault: !!globalDefault.isDefault, isGlobal: !!globalDefault.isGlobal };
@@ -760,7 +760,7 @@ export function getPromptTemplateById(id: number, userEmail: string): PromptTemp
     SELECT * FROM prompt_templates 
     WHERE id = ? AND (isGlobal = 1 OR createdBy = ?)
   `).get(id, userEmail) as PromptTemplate | undefined;
-  db.close();
+
   
   if (!prompt) return null;
   return { ...prompt, isDefault: !!prompt.isDefault, isGlobal: !!prompt.isGlobal };
@@ -802,7 +802,7 @@ export function createPromptTemplate(
     updatedAt: now,
   };
   
-  db.close();
+
   return prompt;
 }
 
@@ -823,7 +823,7 @@ export function updatePromptTemplate(
   const prompt = db.prepare('SELECT createdBy, isGlobal FROM prompt_templates WHERE id = ?').get(id) as { createdBy: string; isGlobal: number } | undefined;
   
   if (!prompt || prompt.isGlobal || prompt.createdBy !== userEmail) {
-    db.close();
+  
     return false;
   }
   
@@ -860,7 +860,7 @@ export function updatePromptTemplate(
   const stmt = db.prepare(`UPDATE prompt_templates SET ${setClauses.join(', ')} WHERE id = ?`);
   const result = stmt.run(...values);
   
-  db.close();
+
   return result.changes > 0;
 }
 
@@ -875,7 +875,7 @@ export function deletePromptTemplate(id: number, userEmail: string): boolean {
   const stmt = db.prepare(`DELETE FROM prompt_templates WHERE ${filterClause}`);
   const result = stmt.run(...params);
 
-  db.close();
+
   return result.changes > 0;
 }
 
@@ -897,7 +897,7 @@ export interface MeetingSummaryCache {
 
 export function saveMeetingSummary(
   meetingId: string,
-  summary: any,
+  summary: object,
   metadata: {
     subject?: string;
     meetingDate?: string;
@@ -930,7 +930,7 @@ export function saveMeetingSummary(
   );
   
   const result = db.prepare('SELECT * FROM meeting_summaries WHERE meetingId = ?').get(meetingId) as MeetingSummaryCache;
-  db.close();
+
   
   return result;
 }
@@ -939,7 +939,7 @@ export function getMeetingSummaryByMeetingId(meetingId: string): MeetingSummaryC
   const db = getDb();
   const stmt = db.prepare('SELECT * FROM meeting_summaries WHERE meetingId = ?');
   const result = stmt.get(meetingId) as MeetingSummaryCache | undefined;
-  db.close();
+
   
   return result || null;
 }
@@ -948,7 +948,7 @@ export function deleteMeetingSummary(meetingId: string): boolean {
   const db = getDb();
   const stmt = db.prepare('DELETE FROM meeting_summaries WHERE meetingId = ?');
   const result = stmt.run(meetingId);
-  db.close();
+
   
   return result.changes > 0;
 }
@@ -957,7 +957,7 @@ export function getAllMeetingSummaries(limit: number = 100): MeetingSummaryCache
   const db = getDb();
   const stmt = db.prepare('SELECT * FROM meeting_summaries ORDER BY generatedAt DESC LIMIT ?');
   const results = stmt.all(limit) as MeetingSummaryCache[];
-  db.close();
+
   
   return results;
 }
@@ -980,7 +980,7 @@ export interface EmailSummaryCache {
 
 export function saveEmailSummary(
   emailId: string,
-  summary: any,
+  summary: object,
   metadata: {
     subject?: string;
     fromEmail?: string;
@@ -1013,7 +1013,7 @@ export function saveEmailSummary(
   );
   
   const result = db.prepare('SELECT * FROM email_summaries WHERE emailId = ?').get(emailId) as EmailSummaryCache;
-  db.close();
+
   
   return result;
 }
@@ -1022,7 +1022,7 @@ export function getEmailSummaryById(emailId: string): EmailSummaryCache | null {
   const db = getDb();
   const stmt = db.prepare('SELECT * FROM email_summaries WHERE emailId = ?');
   const result = stmt.get(emailId) as EmailSummaryCache | undefined;
-  db.close();
+
   
   return result || null;
 }
@@ -1031,7 +1031,7 @@ export function deleteEmailSummary(emailId: string): boolean {
   const db = getDb();
   const stmt = db.prepare('DELETE FROM email_summaries WHERE emailId = ?');
   const result = stmt.run(emailId);
-  db.close();
+
   
   return result.changes > 0;
 }
@@ -1040,7 +1040,7 @@ export function getAllEmailSummaries(limit: number = 100): EmailSummaryCache[] {
   const db = getDb();
   const stmt = db.prepare('SELECT * FROM email_summaries ORDER BY generatedAt DESC LIMIT ?');
   const results = stmt.all(limit) as EmailSummaryCache[];
-  db.close();
+
   
   return results;
 }
@@ -1052,7 +1052,7 @@ export function setDefaultPrompt(id: number, userEmail: string): boolean {
   const prompt = db.prepare('SELECT isGlobal, createdBy FROM prompt_templates WHERE id = ?').get(id) as { isGlobal: number; createdBy: string } | undefined;
   
   if (!prompt || (!prompt.isGlobal && prompt.createdBy !== userEmail)) {
-    db.close();
+  
     return false;
   }
   
@@ -1062,7 +1062,7 @@ export function setDefaultPrompt(id: number, userEmail: string): boolean {
   // Set new default
   db.prepare('UPDATE prompt_templates SET isDefault = 1, updatedAt = ? WHERE id = ?').run(new Date().toISOString(), id);
   
-  db.close();
+
   return true;
 }
 
@@ -1073,14 +1073,14 @@ export function setDefaultPrompt(id: number, userEmail: string): boolean {
 export function clearAllMeetingSummaries(): { deleted: number } {
   const db = getDb();
   const result = db.prepare('DELETE FROM meeting_summaries').run();
-  db.close();
+
   return { deleted: result.changes };
 }
 
 export function clearAllEmailSummaries(): { deleted: number } {
   const db = getDb();
   const result = db.prepare('DELETE FROM email_summaries').run();
-  db.close();
+
   return { deleted: result.changes };
 }
 

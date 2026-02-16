@@ -23,6 +23,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { MICROSOFT_TODO_URL, OUTLOOK_URL } from "@/lib/constants";
 
 interface Meeting {
   id: string;
@@ -299,10 +300,6 @@ export default function DigestPage() {
     fetchDigest();
   }, []);
 
-  useEffect(() => {
-    fetchDigest();
-  }, []);
-
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleDateString("en-US", {
@@ -455,13 +452,13 @@ export default function DigestPage() {
             </Link>
           </Button>
           <Button variant="outline" className="justify-start" asChild>
-            <a href="https://to-do.office.com/tasks/inbox" target="_blank" rel="noopener noreferrer">
+            <a href={MICROSOFT_TODO_URL} target="_blank" rel="noopener noreferrer">
               <CheckSquare className="h-4 w-4 mr-2" />
               Microsoft To Do
             </a>
           </Button>
           <Button variant="outline" className="justify-start" asChild>
-            <a href="https://outlook.office.com/mail" target="_blank" rel="noopener noreferrer">
+            <a href={OUTLOOK_URL} target="_blank" rel="noopener noreferrer">
               <Mail className="h-4 w-4 mr-2" />
               Outlook
             </a>
