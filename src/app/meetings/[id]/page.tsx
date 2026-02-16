@@ -1306,7 +1306,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                     {summary.metrics.length > 0 && (
                       <div>
                         <h4 className="mb-3 flex items-center gap-2 font-semibold">
-                          <TrendingUp className="h-4 w-4 text-purple-600" />
+                          <TrendingUp className="h-4 w-4 text-primary" />
                           Key Metrics
                         </h4>
                         <ul className="space-y-2 text-sm">
@@ -1323,7 +1323,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                     {summary.nextSteps.length > 0 && (
                       <div>
                         <h4 className="mb-3 flex items-center gap-2 font-semibold">
-                          <ArrowRight className="h-4 w-4 text-orange-600" />
+                          <ArrowRight className="h-4 w-4 text-muted-foreground" />
                           Next Steps
                         </h4>
                         <ul className="space-y-2 text-sm">

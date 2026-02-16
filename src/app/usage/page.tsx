@@ -295,12 +295,12 @@ export default function UsagePage() {
 
       {/* Import Result */}
       {importResult && (
-        <Card className={importResult.errors.length > 0 ? "border-yellow-500" : "border-green-500"}>
+        <Card className={importResult.errors.length > 0 ? "border-warning" : "border-success"}>
           <CardContent className="pt-4">
             <div className="flex items-start gap-3">
               <AlertCircle
                 className={`w-5 h-5 ${
-                  importResult.errors.length > 0 ? "text-yellow-500" : "text-green-500"
+                  importResult.errors.length > 0 ? "text-warning" : "text-success"
                 }`}
               />
               <div>
@@ -490,7 +490,7 @@ export default function UsagePage() {
                           <div className="text-center">
                             <p className="text-muted-foreground text-xs">Total</p>
                             <p className="font-bold">{formatNumber(record.totalTokens)}</p>
-                            <p className="text-xs font-medium text-green-600 dark:text-green-400">
+                            <p className="text-xs font-medium text-success">
                               {formatCurrency(record.totalCost)}
                             </p>
                           </div>

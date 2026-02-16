@@ -706,11 +706,9 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
             <div className="flex items-center gap-4">
               {/* Transcript Filter Toggle */}
               <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={showOnlyWithTranscript}
-                  onChange={(e) => setShowOnlyWithTranscript(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  onCheckedChange={(checked) => setShowOnlyWithTranscript(checked === true)}
                 />
                 <span className="flex items-center gap-1 text-sm">
                   <FileText className="h-4 w-4" />
@@ -1068,7 +1066,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                                   <Separator />
                                   <div>
                                     <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                                      <TrendingUp className="h-4 w-4 text-purple-600" />
+                                      <TrendingUp className="h-4 w-4 text-primary" />
                                       Key Metrics
                                     </h4>
                                     <ul className="space-y-1 text-sm">
@@ -1089,7 +1087,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                                   <Separator />
                                   <div>
                                     <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                                      <ArrowRight className="h-4 w-4 text-orange-600" />
+                                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
                                       Next Steps
                                     </h4>
                                     <ul className="space-y-1 text-sm">

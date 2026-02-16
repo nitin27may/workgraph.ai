@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Edit, Trash2, Star, Globe, Database } from "lucide-react";
 import { toast } from "sonner";
 
@@ -415,14 +416,12 @@ Transcript:
                 />
               </div>
               <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   id="isDefault"
                   checked={formData.isDefault}
-                  onChange={(e) =>
-                    setFormData({ ...formData, isDefault: e.target.checked })
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, isDefault: checked === true })
                   }
-                  className="h-4 w-4 rounded border-gray-300"
                 />
                 <Label htmlFor="isDefault" className="cursor-pointer">
                   Set as default prompt
