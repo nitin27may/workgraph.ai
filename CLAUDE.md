@@ -26,6 +26,7 @@ Next.js 16 App Router monolith — all server logic runs as API route handlers, 
 - **`graph.ts`** — Microsoft Graph API client. Handles meetings, transcripts, mail, tasks, calendar, chat, people, files. ~67KB.
 - **`openai.ts`** — Azure OpenAI (GPT-4o) for summarization, digests, meeting prep, email summaries.
 - **`preparation-pipeline.ts`** — Two-stage meeting preparation orchestrator.
+- **`validations.ts`** — Zod schemas for all API route request bodies and query params. Use `parseBody(schema, data)` helper in routes.
 
 ### Auth & Authorization
 

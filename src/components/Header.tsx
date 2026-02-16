@@ -17,7 +17,7 @@ import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 // Admin email constant - must match the one in db.ts
-const ADMIN_EMAIL = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "nitinkumar.singh@nbfc.com";
+const ADMIN_EMAIL = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "";
 
 export function Header() {
   const { data: session } = useSession();

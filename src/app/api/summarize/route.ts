@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { getMeetingTranscript, getOnlineMeetingTranscript } from "@/lib/graph";
 import { summarizeTranscript } from "@/lib/openai";
 import { saveUsageMetrics, isUserAuthorized } from "@/lib/db";
+import { summarizeSchema, parseBody } from "@/lib/validations";
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -20,7 +21,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { callRecordId, sessionId, onlineMeetingId, subject, startDateTime, endDateTime } = body;
+    const parsed = parseBody(summarizeSchema, body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    const { callRecordId, sessionId, onlineMeetingId, subject, startDateTime, endDateTime } = parsed.data;
 
     let transcript: string | null = null;
 

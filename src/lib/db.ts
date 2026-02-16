@@ -59,7 +59,7 @@ export interface PromptTemplate {
 }
 
 // Admin email - has full access by default
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'nitinkumar.singh@nbfc.com';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || '';
 
 function getDb(): Database.Database {
   const db = new Database(DB_PATH);
@@ -116,13 +116,15 @@ function getDb(): Database.Database {
     )
   `);
   
-  // Seed admin user if not exists
-  const adminExists = db.prepare('SELECT id FROM authorized_users WHERE email = ?').get(ADMIN_EMAIL);
-  if (!adminExists) {
-    db.prepare(`
-      INSERT INTO authorized_users (email, name, role, isActive, createdAt, createdBy)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(ADMIN_EMAIL, 'Nitin Kumar Singh', 'admin', 1, new Date().toISOString(), 'system');
+  // Seed admin user if not exists (only if ADMIN_EMAIL is configured)
+  if (ADMIN_EMAIL) {
+    const adminExists = db.prepare('SELECT id FROM authorized_users WHERE email = ?').get(ADMIN_EMAIL);
+    if (!adminExists) {
+      db.prepare(`
+        INSERT INTO authorized_users (email, name, role, isActive, createdAt, createdBy)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(ADMIN_EMAIL, 'Admin', 'admin', 1, new Date().toISOString(), 'system');
+    }
   }
   
   // Seed default global prompt if not exists
@@ -474,7 +476,7 @@ export function clearAllUsage(): number {
 
 // ============ User Authorization Functions ============
 
-const ADMIN_EMAIL_CONST = process.env.ADMIN_EMAIL || 'nitinkumar.singh@nbfc.com';
+const ADMIN_EMAIL_CONST = process.env.ADMIN_EMAIL || '';
 
 export function isAdmin(email: string | null | undefined): boolean {
   if (!email) return false;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getUserPromptTemplates, createPromptTemplate } from "@/lib/db";
+import { createPromptSchema, parseBody } from "@/lib/validations";
 
 // GET /api/prompts - Get all prompts for the user
 export async function GET(request: NextRequest) {
@@ -33,14 +34,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { name, description, systemPrompt, userPromptTemplate, isDefault } = body;
-
-    if (!name || !systemPrompt || !userPromptTemplate) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
+    const parsed = parseBody(createPromptSchema, body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
+    const { name, description, systemPrompt, userPromptTemplate, isDefault } = parsed.data;
 
     const prompt = createPromptTemplate(
       name,

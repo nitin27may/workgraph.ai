@@ -22,6 +22,11 @@ export function getGraphClient(accessToken: string) {
   });
 }
 
+/** Escape single quotes in OData filter strings to prevent injection */
+function sanitizeOData(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
 // Calendar event with online meeting info
 interface CalendarEvent {
   id: string;
@@ -113,10 +118,9 @@ export async function getOnlineMeetingByJoinUrl(
 
   try {
     // Encode the join URL for the filter
-    const encodedUrl = encodeURIComponent(joinWebUrl);
     const response = await client
       .api(`/me/onlineMeetings`)
-      .filter(`JoinWebUrl eq '${joinWebUrl}'`)
+      .filter(`JoinWebUrl eq '${sanitizeOData(joinWebUrl)}'`)
       .get();
 
     if (!response.value || response.value.length === 0) {
@@ -620,7 +624,7 @@ export async function searchPeople(
     try {
       const usersResponse = await client
         .api("/users")
-        .filter(`startswith(displayName,'${query}') or startswith(mail,'${query}')`)
+        .filter(`startswith(displayName,'${sanitizeOData(query)}') or startswith(mail,'${sanitizeOData(query)}')`)
         .top(top)
         .select("id,displayName,mail,jobTitle,department,userPrincipalName")
         .get();
@@ -1425,7 +1429,7 @@ export async function searchDriveItems(
 
   try {
     const response = await client
-      .api(`/me/drive/root/search(q='${query}')`)
+      .api(`/me/drive/root/search(q='${encodeURIComponent(query)}')`)
       .top(top)
       .get();
 
@@ -1765,7 +1769,7 @@ export async function getRecentEmailsWithPeople(
 
     // Build filter for each email address
     const filters = emailAddresses.map(
-      (email) => `(from/emailAddress/address eq '${email}' or recipients/any(r:r/emailAddress/address eq '${email}'))`
+      (email) => `(from/emailAddress/address eq '${sanitizeOData(email)}' or recipients/any(r:r/emailAddress/address eq '${sanitizeOData(email)}'))`
     );
     const filterString = filters.join(" or ");
 

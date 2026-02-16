@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { 
+import {
   isAdmin,
-  getAllAuthorizedUsers, 
-  addAuthorizedUser, 
+  getAllAuthorizedUsers,
+  addAuthorizedUser,
   updateAuthorizedUser,
   deleteAuthorizedUser,
   getUserByEmail,
   exportUsersToCsv,
   importUsersFromCsv,
 } from "@/lib/db";
+import { createUserSchema, updateUserSchema, parseBody } from "@/lib/validations";
 
 // GET /api/users - Get all authorized users (admin only)
 export async function GET(request: NextRequest) {
@@ -87,11 +88,11 @@ export async function POST(request: NextRequest) {
     
     // Handle single user add
     const body = await request.json();
-    const { email, name, role = 'user' } = body;
-
-    if (!email) {
-      return NextResponse.json({ error: "Email is required" }, { status: 400 });
+    const parsed = parseBody(createUserSchema, body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
+    const { email, name, role } = parsed.data;
 
     // Check if user already exists
     const existingUser = getUserByEmail(email);
@@ -128,11 +129,11 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { id, name, role, isActive } = body;
-
-    if (!id) {
-      return NextResponse.json({ error: "User ID is required" }, { status: 400 });
+    const parsed = parseBody(updateUserSchema, body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
+    const { id, name, role, isActive } = parsed.data;
 
     const success = updateAuthorizedUser(id, { name, role, isActive });
     if (success) {

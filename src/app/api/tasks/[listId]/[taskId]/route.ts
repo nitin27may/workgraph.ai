@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { updateTask, deleteTask } from "@/lib/graph";
 import { isUserAuthorized } from "@/lib/db";
+import { updateTaskSchema, parseBody } from "@/lib/validations";
 
 // PATCH /api/tasks/[listId]/[taskId] - Update a task
 export async function PATCH(
@@ -27,12 +28,11 @@ export async function PATCH(
   try {
     const { listId, taskId } = await params;
     const body = await request.json();
-    
-    const updates: { title?: string; status?: "notStarted" | "inProgress" | "completed"; importance?: "low" | "normal" | "high" } = {};
-    
-    if (body.title) updates.title = body.title;
-    if (body.status) updates.status = body.status;
-    if (body.importance) updates.importance = body.importance;
+    const parsed = parseBody(updateTaskSchema, body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    const updates = parsed.data;
 
     const task = await updateTask(session.accessToken, listId, taskId, updates);
     

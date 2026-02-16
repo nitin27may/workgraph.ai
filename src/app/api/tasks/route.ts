@@ -9,6 +9,7 @@ import {
   createMultipleTasks 
 } from "@/lib/graph";
 import { isUserAuthorized } from "@/lib/db";
+import { createTaskSchema, batchCreateTasksSchema, parseBody } from "@/lib/validations";
 import type { CreateTaskRequest } from "@/types/meeting";
 
 // GET /api/tasks - Get all tasks for the user
@@ -76,10 +77,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     // Check if it's a batch request (array of tasks)
-    if (Array.isArray(body.tasks)) {
-      const tasks: CreateTaskRequest[] = body.tasks;
+    if (body.tasks) {
+      const parsed = parseBody(batchCreateTasksSchema, body);
+      if (!parsed.success) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
+      }
+      const tasks: CreateTaskRequest[] = parsed.data.tasks;
       const result = await createMultipleTasks(session.accessToken, tasks);
-      
+
       return NextResponse.json({
         success: true,
         created: result.created,
@@ -88,18 +93,14 @@ export async function POST(request: NextRequest) {
       });
     } else {
       // Single task creation
-      const taskData: CreateTaskRequest = {
-        title: body.title,
-        body: body.body,
-        dueDateTime: body.dueDateTime,
-        importance: body.importance,
-        listId: body.listId,
-        meetingSubject: body.meetingSubject,
-        meetingId: body.meetingId,
-      };
+      const parsed = parseBody(createTaskSchema, body);
+      if (!parsed.success) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
+      }
+      const taskData: CreateTaskRequest = parsed.data;
 
       const task = await createTask(session.accessToken, taskData);
-      
+
       return NextResponse.json({
         success: true,
         task,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { isAdmin } from "@/lib/db";
 import { Client } from "@microsoft/microsoft-graph-client";
 import https from "https";
 
@@ -20,10 +21,18 @@ function getGraphClient(accessToken: string) {
 }
 
 export async function GET(request: NextRequest) {
+  if (process.env.NODE_ENV !== "development") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const session = await getServerSession(authOptions);
 
   if (!session?.accessToken) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!isAdmin(session.user?.email)) {
+    return NextResponse.json({ error: "Forbidden - Admin access required" }, { status: 403 });
   }
 
   const client = getGraphClient(session.accessToken);

@@ -6,6 +6,7 @@ import {
   updatePromptTemplate,
   deletePromptTemplate,
 } from "@/lib/db";
+import { updatePromptSchema, parseBody } from "@/lib/validations";
 
 // GET /api/prompts/[id] - Get a specific prompt
 export async function GET(
@@ -59,7 +60,11 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { name, description, systemPrompt, userPromptTemplate, isDefault } = body;
+    const parsed = parseBody(updatePromptSchema, body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    const { name, description, systemPrompt, userPromptTemplate, isDefault } = parsed.data;
 
     const success = updatePromptTemplate(id, session.user.email, {
       name,

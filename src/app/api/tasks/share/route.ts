@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { shareTaskViaEmail, assignTaskToUser } from "@/lib/graph";
 import { isUserAuthorized } from "@/lib/db";
+import { shareTaskSchema, parseBody } from "@/lib/validations";
 
 // POST /api/tasks/share - Share a task with another user
 export async function POST(request: NextRequest) {
@@ -23,26 +24,22 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { 
-      taskTitle, 
-      taskBody, 
+    const parsed = parseBody(shareTaskSchema, body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    const {
+      taskTitle,
+      taskBody,
       taskBodyHtml,
-      recipientEmail, 
+      recipientEmail,
       ccRecipients,
       meetingSubject,
       emailSubject,
-      // For assigning as a new task
       assignAsTask,
       dueDateTime,
       importance,
-    } = body;
-
-    if (!taskTitle || !recipientEmail) {
-      return NextResponse.json(
-        { error: "Task title and recipient email are required" },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     // Use emailSubject if provided, otherwise fall back to taskTitle
     const subject = emailSubject || taskTitle;
