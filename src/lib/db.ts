@@ -61,10 +61,15 @@ export interface PromptTemplate {
 // Admin email - has full access by default
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || '';
 
+// Singleton database instance
+let _db: Database.Database | null = null;
+
 function getDb(): Database.Database {
+  if (_db) return _db;
+
   const db = new Database(DB_PATH);
-  
-  // Create usage table if it doesn't exist
+
+  // Run schema initialization once
   db.exec(`
     CREATE TABLE IF NOT EXISTS usage (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -192,8 +197,7 @@ Transcript:
       transcriptLength INTEGER,
       model TEXT,
       generatedAt TEXT NOT NULL,
-      generatedBy TEXT,
-      FOREIGN KEY (meetingId) REFERENCES meetings(id) ON DELETE CASCADE
+      generatedBy TEXT
     )
   `);
 
@@ -217,8 +221,9 @@ Transcript:
   db.exec(`CREATE INDEX IF NOT EXISTS idx_meeting_summaries_generatedAt ON meeting_summaries(generatedAt)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_email_summaries_emailId ON email_summaries(emailId)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_email_summaries_generatedAt ON email_summaries(generatedAt)`);
-  
-  return db;
+
+  _db = db;
+  return _db;
 }
 
 export function calculateCost(tokenUsage: TokenUsage): { inputCost: number; outputCost: number; totalCost: number } {
@@ -476,11 +481,9 @@ export function clearAllUsage(): number {
 
 // ============ User Authorization Functions ============
 
-const ADMIN_EMAIL_CONST = process.env.ADMIN_EMAIL || '';
-
 export function isAdmin(email: string | null | undefined): boolean {
   if (!email) return false;
-  return email.toLowerCase() === ADMIN_EMAIL_CONST.toLowerCase();
+  return email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }
 
 export function isUserAuthorized(email: string | null | undefined): { authorized: boolean; user: AuthorizedUser | null; isAdmin: boolean } {

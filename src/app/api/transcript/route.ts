@@ -1,22 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { getOnlineMeetingTranscript } from "@/lib/graph";
-import { isUserAuthorized } from "@/lib/db";
+import { withAuth } from "@/lib/api-auth";
 import { onlineMeetingIdSchema, parseBody } from "@/lib/validations";
 
-export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { authorized } = isUserAuthorized(session.user?.email);
-  if (!authorized) {
-    return NextResponse.json({ error: "Forbidden - You are not authorized to use this application" }, { status: 403 });
-  }
-
+export const POST = withAuth(async (request: NextRequest, session) => {
   try {
     const body = await request.json();
     const parsed = parseBody(onlineMeetingIdSchema, body);
@@ -25,7 +12,6 @@ export async function POST(request: NextRequest) {
     }
     const { onlineMeetingId } = parsed.data;
 
-    // Fetch transcript
     const transcript = await getOnlineMeetingTranscript(
       session.accessToken,
       onlineMeetingId
@@ -46,4 +32,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

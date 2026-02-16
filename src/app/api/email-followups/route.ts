@@ -1,31 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { getFlaggedEmails, getUnreadImportantEmails } from "@/lib/graph";
-import { isUserAuthorized } from "@/lib/db";
+import { withAuth } from "@/lib/api-auth";
 
-export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Check if user is authorized to use the app
-  const { authorized } = isUserAuthorized(session.user?.email);
-  if (!authorized) {
-    return NextResponse.json(
-      { error: "Forbidden - You are not authorized to use this application" },
-      { status: 403 }
-    );
-  }
-
+export const GET = withAuth(async (request: NextRequest, session) => {
   try {
     const searchParams = request.nextUrl.searchParams;
     const dueDate = searchParams.get("dueDate") as "today" | "overdue" | "upcoming" | "all" | null;
     const includeCompleted = searchParams.get("includeCompleted") === "true";
 
-    // Fetch flagged emails and unread important emails in parallel
     const [flaggedEmails, unreadImportant] = await Promise.all([
       getFlaggedEmails(session.accessToken, {
         dueDate: dueDate || "all",
@@ -34,7 +16,6 @@ export async function GET(request: NextRequest) {
       getUnreadImportantEmails(session.accessToken, 20),
     ]);
 
-    // Categorize emails
     const now = new Date();
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
@@ -79,4 +60,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

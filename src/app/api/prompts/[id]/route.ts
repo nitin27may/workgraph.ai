@@ -1,26 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import {
   getPromptTemplateById,
   updatePromptTemplate,
   deletePromptTemplate,
 } from "@/lib/db";
+import { withAuth } from "@/lib/api-auth";
 import { updatePromptSchema, parseBody } from "@/lib/validations";
 
-// GET /api/prompts/[id] - Get a specific prompt
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getServerSession(authOptions);
+type RouteContext = { params: Promise<{ id: string }> };
 
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export const GET = withAuth(async (_request: NextRequest, session, context: RouteContext) => {
   try {
-    const { id: idParam } = await params;
+    const { id: idParam } = await context.params;
     const id = parseInt(idParam);
     if (isNaN(id)) {
       return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
@@ -39,21 +30,11 @@ export async function GET(
       { status: 500 }
     );
   }
-}
+});
 
-// PUT /api/prompts/[id] - Update a prompt
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export const PUT = withAuth(async (request: NextRequest, session, context: RouteContext) => {
   try {
-    const { id: idParam } = await params;
+    const { id: idParam } = await context.params;
     const id = parseInt(idParam);
     if (isNaN(id)) {
       return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
@@ -90,21 +71,11 @@ export async function PUT(
       { status: 500 }
     );
   }
-}
+});
 
-// DELETE /api/prompts/[id] - Delete a prompt
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export const DELETE = withAuth(async (_request: NextRequest, session, context: RouteContext) => {
   try {
-    const { id: idParam } = await params;
+    const { id: idParam } = await context.params;
     const id = parseInt(idParam);
     if (isNaN(id)) {
       return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
@@ -127,4 +98,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-}
+});

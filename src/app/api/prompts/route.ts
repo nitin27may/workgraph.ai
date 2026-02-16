@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { getUserPromptTemplates, createPromptTemplate } from "@/lib/db";
+import { withAuth } from "@/lib/api-auth";
 import { createPromptSchema, parseBody } from "@/lib/validations";
 
-// GET /api/prompts - Get all prompts for the user
-export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export const GET = withAuth(async (_request: NextRequest, session) => {
   try {
     const prompts = getUserPromptTemplates(session.user.email);
     return NextResponse.json(prompts);
@@ -22,16 +14,9 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
-// POST /api/prompts - Create a new prompt
-export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export const POST = withAuth(async (request: NextRequest, session) => {
   try {
     const body = await request.json();
     const parsed = parseBody(createPromptSchema, body);
@@ -57,4 +42,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

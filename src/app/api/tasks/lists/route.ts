@@ -1,26 +1,8 @@
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
 import { getTaskLists } from "@/lib/graph";
-import { isUserAuthorized } from "@/lib/db";
+import { withAuth } from "@/lib/api-auth";
 
-// GET /api/tasks/lists - Get all task lists for the user
-export async function GET() {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Check if user is authorized
-  const { authorized } = isUserAuthorized(session.user?.email);
-  if (!authorized) {
-    return NextResponse.json(
-      { error: "Forbidden - You are not authorized to use this application" },
-      { status: 403 }
-    );
-  }
-
+export const GET = withAuth(async (_request: NextRequest, session) => {
   try {
     const lists = await getTaskLists(session.accessToken);
     return NextResponse.json({ lists });
@@ -31,4 +13,4 @@ export async function GET() {
       { status: 500 }
     );
   }
-}
+});

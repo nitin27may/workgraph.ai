@@ -1,24 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { getMeetingTranscript, getOnlineMeetingTranscript } from "@/lib/graph";
+import { getOnlineMeetingTranscript } from "@/lib/graph";
 import { summarizeTranscript } from "@/lib/openai";
-import { saveUsageMetrics, isUserAuthorized } from "@/lib/db";
+import { saveUsageMetrics } from "@/lib/db";
+import { withAuth } from "@/lib/api-auth";
 import { summarizeSchema, parseBody } from "@/lib/validations";
 
-export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Check if user is authorized to use the app
-  const { authorized } = isUserAuthorized(session.user?.email);
-  if (!authorized) {
-    return NextResponse.json({ error: "Forbidden - You are not authorized to use this application" }, { status: 403 });
-  }
-
+export const POST = withAuth(async (request: NextRequest, session) => {
   try {
     const body = await request.json();
     const parsed = parseBody(summarizeSchema, body);
@@ -35,12 +22,6 @@ export async function POST(request: NextRequest) {
       transcript = await getOnlineMeetingTranscript(session.accessToken, onlineMeetingId);
     }
 
-    // Fallback to Call Records API
-    if (!transcript && callRecordId && sessionId) {
-      console.log("Falling back to Call Records API for:", callRecordId);
-      transcript = await getMeetingTranscript(session.accessToken, callRecordId, sessionId);
-    }
-
     if (!transcript) {
       return NextResponse.json(
         { error: "Transcript not available" },
@@ -50,29 +31,27 @@ export async function POST(request: NextRequest) {
 
     // Summarize with Azure OpenAI
     const { summary, metrics } = await summarizeTranscript(
-      transcript, 
-      subject, 
-      startDateTime,
+      transcript,
+      subject || "Untitled Meeting",
+      startDateTime || new Date().toISOString(),
       endDateTime,
       {
-        name: session.user?.name ?? undefined,
-        email: session.user?.email ?? undefined,
+        name: session.user.name ?? undefined,
+        email: session.user.email,
       }
     );
 
     // Save usage metrics to SQLite
     try {
       const savedRecord = saveUsageMetrics(metrics);
-      console.log('📊 Usage saved to database:', savedRecord.id);
+      console.log('Usage saved to database:', savedRecord.id);
     } catch (dbError) {
       console.error('Failed to save usage metrics:', dbError);
-      // Don't fail the request if DB save fails
     }
 
-    // Return both summary and metrics to the client
     return NextResponse.json({
       ...summary,
-      _metrics: metrics, // Prefixed with _ to indicate metadata
+      _metrics: metrics,
     });
   } catch (error) {
     console.error("Error in summarize API:", error);
@@ -81,4 +60,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

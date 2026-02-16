@@ -100,7 +100,7 @@ export const updateUserSchema = z.object({
   id: z.number().int().positive(),
   name: z.string().max(200).optional(),
   role: z.enum(["admin", "user"]).optional(),
-  isActive: z.union([z.boolean(), z.number()]).optional(),
+  isActive: z.union([z.boolean(), z.number().transform(v => !!v)]).optional(),
 });
 
 // ============ Query Params ============
