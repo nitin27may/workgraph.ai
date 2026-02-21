@@ -9,7 +9,7 @@
  */
 
 import type { MeetingPrep } from "./graph";
-import type { MeetingSummary } from "@/types/meeting";
+import type { MeetingSummary, TokenUsage } from "@/types/meeting";
 import {
   summarizeTranscriptInChunks,
   summarizeEmail,
@@ -28,6 +28,12 @@ import {
   type MeetingSummaryCache,
   type EmailSummaryCache,
 } from "./db";
+
+function addTokens(accumulator: TokenUsage, usage: TokenUsage): void {
+  accumulator.promptTokens += usage.promptTokens;
+  accumulator.completionTokens += usage.completionTokens;
+  accumulator.totalTokens += usage.totalTokens;
+}
 
 // ============================================
 // Pipeline Orchestrator
@@ -92,6 +98,9 @@ export async function generateMeetingPreparations(
     relatedEmails: context.context.relatedEmails.length,
   });
 
+  // Running token accumulator across all OpenAI calls in the pipeline
+  const accumulatedTokens: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
   // ============================================
   // Step 1: Process Related Meetings
   // ============================================
@@ -134,6 +143,9 @@ export async function generateMeetingPreparations(
             meeting.endDateTime,
             { email: userEmail }
           );
+
+          // Accumulate token usage from transcript summarization
+          addTokens(accumulatedTokens, result.metrics.tokenUsage);
 
           // Save to cache
           saveMeetingSummary(meeting.id, result.summary, {
@@ -191,12 +203,15 @@ export async function generateMeetingPreparations(
         // Generate new summary only if full body exists
         if (email.fullBody && email.fullBody.trim().length > 0) {
           console.log(`⚙️ Generating summary for email: ${email.subject}`);
-          
-          const summary = await summarizeEmail(email.fullBody, {
+
+          const { summary, tokenUsage: emailTokenUsage } = await summarizeEmail(email.fullBody, {
             subject: email.subject || 'No Subject',
             from: email.from?.emailAddress.name || email.from?.emailAddress.address || 'Unknown',
             date: email.receivedDateTime || new Date().toISOString(),
           });
+
+          // Accumulate token usage from email summarization
+          addTokens(accumulatedTokens, emailTokenUsage);
 
           // Save to cache
           saveEmailSummary(email.id, summary, {
@@ -274,7 +289,9 @@ export async function generateMeetingPreparations(
       groups.push(group);
     }
 
-    meetingThreadBriefs = await Promise.all(groups.map((g) => aggregateMeetingThread(g)));
+    const meetingThreadResults = await Promise.all(groups.map((g) => aggregateMeetingThread(g)));
+    meetingThreadBriefs = meetingThreadResults.map((r) => r.text);
+    for (const r of meetingThreadResults) addTokens(accumulatedTokens, r.tokenUsage);
     console.log(`✓ Reduced to ${meetingThreadBriefs.length} meeting thread briefs`);
   }
 
@@ -290,9 +307,11 @@ export async function generateMeetingPreparations(
       senderGroups.get(key)!.push(email);
     }
 
-    emailThreadBriefs = await Promise.all(
+    const emailThreadResults = await Promise.all(
       Array.from(senderGroups.values()).map((g) => aggregateEmailThread(g))
     );
+    emailThreadBriefs = emailThreadResults.map((r) => r.text);
+    for (const r of emailThreadResults) addTokens(accumulatedTokens, r.tokenUsage);
     console.log(`✓ Reduced to ${emailThreadBriefs.length} email thread briefs`);
   }
 
@@ -377,6 +396,7 @@ export async function generateMeetingPreparations(
           .map((c) => JSON.parse(c.content)),
       });
 
+      addTokens(accumulatedTokens, chunkSummary.tokenUsage);
       intermediateSummaries.push(chunkSummary.brief);
       console.log(`✓ Generated intermediate summary ${intermediateSummaries.length}/${Math.ceil(allSummaries.length / CHUNK_SIZE)}`);
     }
@@ -407,6 +427,7 @@ export async function generateMeetingPreparations(
       };
 
       briefResult = await createPreparationBrief(metaBriefInput);
+      addTokens(accumulatedTokens, briefResult.tokenUsage);
       console.log(`✓ Final brief created (${layers} layers)`);
     } else {
       // Only one intermediate summary, use it as the final brief
@@ -418,6 +439,7 @@ export async function generateMeetingPreparations(
       console.log(`⚠️  Large context (${estimatedTokens.toLocaleString()} tokens) but multi-stage disabled. Consider enabling it.`);
     }
     briefResult = await createPreparationBrief(briefInput);
+    addTokens(accumulatedTokens, briefResult.tokenUsage);
   }
 
   const processingTimeMs = Date.now() - startTime;
@@ -430,7 +452,7 @@ export async function generateMeetingPreparations(
     emailsProcessed: emailSummaries.length,
     cached: meetingsCached + emailsCached,
     generated: meetingsGenerated + emailsGenerated,
-    briefTokens: briefResult.tokenUsage.totalTokens,
+    accumulatedTokens: accumulatedTokens.totalTokens,
     reducedMeetingThreads: meetingThreadBriefs?.length ?? 0,
     reducedEmailThreads: emailThreadBriefs?.length ?? 0,
   });
@@ -447,7 +469,7 @@ export async function generateMeetingPreparations(
       emailsCached,
       emailsGenerated,
       processingTimeMs,
-      briefTokenUsage: briefResult.tokenUsage,
+      briefTokenUsage: accumulatedTokens,
       reducedMeetingThreads: meetingThreadBriefs?.length ?? 0,
       reducedEmailThreads: emailThreadBriefs?.length ?? 0,
     },

@@ -12,7 +12,7 @@ import {
   type EmailMessage,
   type ChannelMessage
 } from "@/lib/graph";
-import { isUserAuthorized } from "@/lib/db";
+import { isUserAuthorized, savePrepUsageMetrics } from "@/lib/db";
 import { generateMeetingPreparations } from "@/lib/preparation-pipeline";
 import type { Meeting } from "@/types/meeting";
 
@@ -37,6 +37,31 @@ export const GET = withAuth(async (request: NextRequest, session) => {
             prepContext,
             session.user?.email || 'unknown'
           );
+
+          // Record prep usage (non-fatal)
+          try {
+            savePrepUsageMetrics({
+              meetingSubject: prepContext.meeting.subject,
+              meetingDate: prepContext.meeting.startDateTime,
+              totalMeetingsAnalyzed: enhancedPrep.stats.totalMeetings,
+              meetingsCached: enhancedPrep.stats.meetingsCached,
+              meetingsGenerated: enhancedPrep.stats.meetingsGenerated,
+              totalEmailsAnalyzed: enhancedPrep.stats.totalEmails,
+              emailsCached: enhancedPrep.stats.emailsCached,
+              emailsGenerated: enhancedPrep.stats.emailsGenerated,
+              approach: enhancedPrep.approach || 'single-stage',
+              layers: enhancedPrep.layers || 1,
+              reducedMeetingThreads: enhancedPrep.stats.reducedMeetingThreads,
+              reducedEmailThreads: enhancedPrep.stats.reducedEmailThreads,
+              tokenUsage: enhancedPrep.stats.briefTokenUsage,
+              processingTimeMs: enhancedPrep.stats.processingTimeMs,
+              model: process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o',
+              requestedBy: session.user?.name,
+              requestedByEmail: session.user?.email,
+            });
+          } catch (dbError) {
+            console.error('Failed to save prep usage:', dbError);
+          }
 
           return NextResponse.json({
             ...prepContext,
@@ -336,6 +361,31 @@ export async function POST(request: NextRequest) {
       session.user?.email || "unknown",
       multiStageSummary || false // Pass multi-stage flag
     );
+
+    // Record prep usage (non-fatal)
+    try {
+      savePrepUsageMetrics({
+        meetingSubject: targetMeeting.subject,
+        meetingDate: targetMeeting.start.dateTime,
+        totalMeetingsAnalyzed: enhancedPrep.stats.totalMeetings,
+        meetingsCached: enhancedPrep.stats.meetingsCached,
+        meetingsGenerated: enhancedPrep.stats.meetingsGenerated,
+        totalEmailsAnalyzed: enhancedPrep.stats.totalEmails,
+        emailsCached: enhancedPrep.stats.emailsCached,
+        emailsGenerated: enhancedPrep.stats.emailsGenerated,
+        approach: enhancedPrep.approach || 'single-stage',
+        layers: enhancedPrep.layers || 1,
+        reducedMeetingThreads: enhancedPrep.stats.reducedMeetingThreads,
+        reducedEmailThreads: enhancedPrep.stats.reducedEmailThreads,
+        tokenUsage: enhancedPrep.stats.briefTokenUsage,
+        processingTimeMs: enhancedPrep.stats.processingTimeMs,
+        model: process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o',
+        requestedBy: session.user?.name,
+        requestedByEmail: session.user?.email,
+      });
+    } catch (dbError) {
+      console.error('Failed to save prep usage:', dbError);
+    }
 
     return NextResponse.json({
       targetMeeting: {

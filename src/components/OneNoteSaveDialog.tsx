@@ -140,11 +140,15 @@ export function OneNoteSaveDialog({
       const label =
         payload.mode === "actionItems" ? "Action items" : "Meeting summary";
 
-      if (data.page?.webUrl) {
+      const pageUrl =
+        data.page?.webUrl ||
+        data.page?.links?.oneNoteWebUrl?.href;
+
+      if (pageUrl) {
         toast.success(`${label} saved to OneNote`, {
           action: {
             label: "Open in OneNote",
-            onClick: () => window.open(data.page.webUrl, "_blank", "noopener,noreferrer"),
+            onClick: () => window.open(pageUrl, "_blank", "noopener,noreferrer"),
           },
           duration: 8000,
         });

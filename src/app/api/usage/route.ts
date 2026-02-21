@@ -6,6 +6,11 @@ import {
   importUsageFromCsv,
   deleteUsageRecord,
   clearAllUsage,
+  getAllPrepUsageRecords,
+  getPrepUsageStats,
+  exportPrepUsageToCsv,
+  deletePrepUsageRecord,
+  clearAllPrepUsage,
   PRICING,
 } from "@/lib/db";
 import { withAdminAuth } from "@/lib/api-auth";
@@ -14,8 +19,32 @@ export const GET = withAdminAuth(async (request: NextRequest) => {
   const { searchParams } = new URL(request.url);
   const format = searchParams.get("format");
   const type = searchParams.get("type");
+  const tab = searchParams.get("tab");
 
   try {
+    // Prep usage tab
+    if (tab === "prep") {
+      if (format === "csv") {
+        const csv = exportPrepUsageToCsv();
+        return new NextResponse(csv, {
+          headers: {
+            "Content-Type": "text/csv",
+            "Content-Disposition": `attachment; filename="prep-usage-export-${new Date().toISOString().split('T')[0]}.csv"`,
+          },
+        });
+      }
+
+      if (type === "stats") {
+        const stats = getPrepUsageStats();
+        return NextResponse.json({ ...stats, pricing: PRICING });
+      }
+
+      const records = getAllPrepUsageRecords();
+      const stats = getPrepUsageStats();
+      return NextResponse.json({ records, stats, pricing: PRICING });
+    }
+
+    // Default: summarization usage
     if (format === "csv") {
       const csv = exportUsageToCsv();
       return new NextResponse(csv, {
@@ -94,8 +123,26 @@ export const DELETE = withAdminAuth(async (request: NextRequest) => {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   const clearAll = searchParams.get("clearAll");
+  const tab = searchParams.get("tab");
 
   try {
+    // Prep usage tab
+    if (tab === "prep") {
+      if (clearAll === "true") {
+        const deleted = clearAllPrepUsage();
+        return NextResponse.json({ message: `Cleared ${deleted} prep usage records`, deleted });
+      }
+      if (id) {
+        const success = deletePrepUsageRecord(parseInt(id));
+        if (success) {
+          return NextResponse.json({ message: "Record deleted" });
+        }
+        return NextResponse.json({ error: "Record not found" }, { status: 404 });
+      }
+      return NextResponse.json({ error: "No id or clearAll parameter provided" }, { status: 400 });
+    }
+
+    // Default: summarization usage
     if (clearAll === "true") {
       const deleted = clearAllUsage();
       return NextResponse.json({

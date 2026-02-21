@@ -235,7 +235,37 @@ Transcript:
 
   db.exec(`CREATE INDEX IF NOT EXISTS idx_discovery_cache_meetingId ON discovery_cache(meetingId)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_discovery_cache_expiresAt ON discovery_cache(expiresAt)`);
-  
+
+  // Create prep_usage table for tracking meeting preparation costs
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS prep_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      meetingSubject TEXT NOT NULL,
+      meetingDate TEXT NOT NULL,
+      totalMeetingsAnalyzed INTEGER NOT NULL DEFAULT 0,
+      meetingsCached INTEGER NOT NULL DEFAULT 0,
+      meetingsGenerated INTEGER NOT NULL DEFAULT 0,
+      totalEmailsAnalyzed INTEGER NOT NULL DEFAULT 0,
+      emailsCached INTEGER NOT NULL DEFAULT 0,
+      emailsGenerated INTEGER NOT NULL DEFAULT 0,
+      approach TEXT NOT NULL DEFAULT 'single-stage',
+      layers INTEGER NOT NULL DEFAULT 1,
+      reducedMeetingThreads INTEGER NOT NULL DEFAULT 0,
+      reducedEmailThreads INTEGER NOT NULL DEFAULT 0,
+      promptTokens INTEGER NOT NULL,
+      completionTokens INTEGER NOT NULL,
+      totalTokens INTEGER NOT NULL,
+      processingTimeMs INTEGER NOT NULL,
+      model TEXT NOT NULL,
+      inputCost REAL NOT NULL,
+      outputCost REAL NOT NULL,
+      totalCost REAL NOT NULL,
+      createdAt TEXT NOT NULL,
+      requestedBy TEXT,
+      requestedByEmail TEXT
+    )
+  `);
+
   return db;
 }
 
@@ -490,6 +520,235 @@ export function clearAllUsage(): number {
   const result = stmt.run();
 
   return result.changes;
+}
+
+// ============ Prep Usage Functions ============
+
+export interface PrepUsageRecord {
+  id: number;
+  meetingSubject: string;
+  meetingDate: string;
+  totalMeetingsAnalyzed: number;
+  meetingsCached: number;
+  meetingsGenerated: number;
+  totalEmailsAnalyzed: number;
+  emailsCached: number;
+  emailsGenerated: number;
+  approach: string;
+  layers: number;
+  reducedMeetingThreads: number;
+  reducedEmailThreads: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  processingTimeMs: number;
+  model: string;
+  inputCost: number;
+  outputCost: number;
+  totalCost: number;
+  createdAt: string;
+  requestedBy: string | null;
+  requestedByEmail: string | null;
+}
+
+export interface PrepUsageMetrics {
+  meetingSubject: string;
+  meetingDate: string;
+  totalMeetingsAnalyzed: number;
+  meetingsCached: number;
+  meetingsGenerated: number;
+  totalEmailsAnalyzed: number;
+  emailsCached: number;
+  emailsGenerated: number;
+  approach: string;
+  layers: number;
+  reducedMeetingThreads: number;
+  reducedEmailThreads: number;
+  tokenUsage: TokenUsage;
+  processingTimeMs: number;
+  model: string;
+  requestedBy?: string | null;
+  requestedByEmail?: string | null;
+}
+
+export function savePrepUsageMetrics(metrics: PrepUsageMetrics): PrepUsageRecord {
+  const db = getDb();
+  const costs = calculateCost(metrics.tokenUsage);
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    INSERT INTO prep_usage (
+      meetingSubject, meetingDate,
+      totalMeetingsAnalyzed, meetingsCached, meetingsGenerated,
+      totalEmailsAnalyzed, emailsCached, emailsGenerated,
+      approach, layers, reducedMeetingThreads, reducedEmailThreads,
+      promptTokens, completionTokens, totalTokens,
+      processingTimeMs, model,
+      inputCost, outputCost, totalCost,
+      createdAt, requestedBy, requestedByEmail
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const result = stmt.run(
+    metrics.meetingSubject,
+    metrics.meetingDate,
+    metrics.totalMeetingsAnalyzed,
+    metrics.meetingsCached,
+    metrics.meetingsGenerated,
+    metrics.totalEmailsAnalyzed,
+    metrics.emailsCached,
+    metrics.emailsGenerated,
+    metrics.approach,
+    metrics.layers,
+    metrics.reducedMeetingThreads,
+    metrics.reducedEmailThreads,
+    metrics.tokenUsage.promptTokens,
+    metrics.tokenUsage.completionTokens,
+    metrics.tokenUsage.totalTokens,
+    metrics.processingTimeMs,
+    metrics.model,
+    costs.inputCost,
+    costs.outputCost,
+    costs.totalCost,
+    now,
+    metrics.requestedBy ?? null,
+    metrics.requestedByEmail ?? null
+  );
+
+  return {
+    id: result.lastInsertRowid as number,
+    meetingSubject: metrics.meetingSubject,
+    meetingDate: metrics.meetingDate,
+    totalMeetingsAnalyzed: metrics.totalMeetingsAnalyzed,
+    meetingsCached: metrics.meetingsCached,
+    meetingsGenerated: metrics.meetingsGenerated,
+    totalEmailsAnalyzed: metrics.totalEmailsAnalyzed,
+    emailsCached: metrics.emailsCached,
+    emailsGenerated: metrics.emailsGenerated,
+    approach: metrics.approach,
+    layers: metrics.layers,
+    reducedMeetingThreads: metrics.reducedMeetingThreads,
+    reducedEmailThreads: metrics.reducedEmailThreads,
+    promptTokens: metrics.tokenUsage.promptTokens,
+    completionTokens: metrics.tokenUsage.completionTokens,
+    totalTokens: metrics.tokenUsage.totalTokens,
+    processingTimeMs: metrics.processingTimeMs,
+    model: metrics.model,
+    inputCost: costs.inputCost,
+    outputCost: costs.outputCost,
+    totalCost: costs.totalCost,
+    createdAt: now,
+    requestedBy: metrics.requestedBy ?? null,
+    requestedByEmail: metrics.requestedByEmail ?? null,
+  };
+}
+
+export function getAllPrepUsageRecords(): PrepUsageRecord[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prep_usage ORDER BY createdAt DESC').all() as PrepUsageRecord[];
+}
+
+export function getPrepUsageStats(): {
+  totalRecords: number;
+  totalTokens: number;
+  totalCost: number;
+  avgTokensPerPrep: number;
+  avgCostPerPrep: number;
+  totalMeetingsAnalyzed: number;
+  totalEmailsAnalyzed: number;
+} {
+  const db = getDb();
+  return db.prepare(`
+    SELECT
+      COUNT(*) as totalRecords,
+      COALESCE(SUM(totalTokens), 0) as totalTokens,
+      COALESCE(SUM(totalCost), 0) as totalCost,
+      COALESCE(AVG(totalTokens), 0) as avgTokensPerPrep,
+      COALESCE(AVG(totalCost), 0) as avgCostPerPrep,
+      COALESCE(SUM(totalMeetingsAnalyzed), 0) as totalMeetingsAnalyzed,
+      COALESCE(SUM(totalEmailsAnalyzed), 0) as totalEmailsAnalyzed
+    FROM prep_usage
+  `).get() as {
+    totalRecords: number;
+    totalTokens: number;
+    totalCost: number;
+    avgTokensPerPrep: number;
+    avgCostPerPrep: number;
+    totalMeetingsAnalyzed: number;
+    totalEmailsAnalyzed: number;
+  };
+}
+
+export function deletePrepUsageRecord(id: number): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM prep_usage WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+export function clearAllPrepUsage(): number {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM prep_usage').run();
+  return result.changes;
+}
+
+export function exportPrepUsageToCsv(): string {
+  const records = getAllPrepUsageRecords();
+
+  const headers = [
+    'ID',
+    'Meeting Subject',
+    'Meeting Date',
+    'Meetings Analyzed',
+    'Meetings Cached',
+    'Meetings Generated',
+    'Emails Analyzed',
+    'Emails Cached',
+    'Emails Generated',
+    'Approach',
+    'Layers',
+    'Reduced Meeting Threads',
+    'Reduced Email Threads',
+    'Prompt Tokens',
+    'Completion Tokens',
+    'Total Tokens',
+    'Processing Time (ms)',
+    'Model',
+    'Input Cost ($)',
+    'Output Cost ($)',
+    'Total Cost ($)',
+    'Created At',
+    'Requested By',
+    'Requested By Email',
+  ];
+
+  const rows = records.map(r => [
+    r.id,
+    `"${r.meetingSubject.replace(/"/g, '""')}"`,
+    r.meetingDate,
+    r.totalMeetingsAnalyzed,
+    r.meetingsCached,
+    r.meetingsGenerated,
+    r.totalEmailsAnalyzed,
+    r.emailsCached,
+    r.emailsGenerated,
+    r.approach,
+    r.layers,
+    r.reducedMeetingThreads,
+    r.reducedEmailThreads,
+    r.promptTokens,
+    r.completionTokens,
+    r.totalTokens,
+    r.processingTimeMs,
+    r.model,
+    r.inputCost.toFixed(6),
+    r.outputCost.toFixed(6),
+    r.totalCost.toFixed(6),
+    r.createdAt,
+    r.requestedBy ? `"${r.requestedBy.replace(/"/g, '""')}"` : '',
+    r.requestedByEmail ?? '',
+  ].join(','));
+
+  return [headers.join(','), ...rows].join('\n');
 }
 
 // ============ User Authorization Functions ============

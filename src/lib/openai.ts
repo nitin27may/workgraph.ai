@@ -210,6 +210,9 @@ export async function summarizeTranscriptInChunks(
   const model = process.env.AZURE_OPENAI_DEPLOYMENT!;
   let rollingContext = "";
 
+  // Accumulate token usage across all intermediate chunk calls
+  const chunkTokens: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
   // Intermediate chunks: produce a rolling context summary (not the final structured output)
   for (let i = 0; i < chunks.length - 1; i++) {
     const chunkContent = rollingContext
@@ -232,6 +235,10 @@ export async function summarizeTranscriptInChunks(
       })
     );
 
+    chunkTokens.promptTokens += response.usage?.prompt_tokens ?? 0;
+    chunkTokens.completionTokens += response.usage?.completion_tokens ?? 0;
+    chunkTokens.totalTokens += response.usage?.total_tokens ?? 0;
+
     rollingContext = response.choices[0].message.content || rollingContext;
     console.log(`Transcript chunk ${i + 1}/${chunks.length - 1} condensed`);
   }
@@ -242,7 +249,14 @@ export async function summarizeTranscriptInChunks(
     ? `[Context from earlier in the meeting:\n${rollingContext}]\n\n[Final portion of transcript]:\n${lastChunk}`
     : lastChunk;
 
-  return summarizeTranscript(finalTranscript, meetingSubject, meetingDate, endDateTime, userInfo);
+  const result = await summarizeTranscript(finalTranscript, meetingSubject, meetingDate, endDateTime, userInfo);
+
+  // Add intermediate chunk tokens to the final result
+  result.metrics.tokenUsage.promptTokens += chunkTokens.promptTokens;
+  result.metrics.tokenUsage.completionTokens += chunkTokens.completionTokens;
+  result.metrics.tokenUsage.totalTokens += chunkTokens.totalTokens;
+
+  return result;
 }
 
 // ============================================
@@ -251,13 +265,15 @@ export async function summarizeTranscriptInChunks(
 // before passing to the final preparation brief generator.
 // ============================================
 
+const ZERO_TOKEN_USAGE: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
 export async function aggregateMeetingThread(
   meetings: Array<{ subject: string; date: string; summary: MeetingSummary }>
-): Promise<string> {
-  if (meetings.length === 0) return "";
+): Promise<{ text: string; tokenUsage: TokenUsage }> {
+  if (meetings.length === 0) return { text: "", tokenUsage: { ...ZERO_TOKEN_USAGE } };
   if (meetings.length === 1) {
     const m = meetings[0];
-    return `${m.subject}: ${m.summary.fullSummary || ""}`;
+    return { text: `${m.subject}: ${m.summary.fullSummary || ""}`, tokenUsage: { ...ZERO_TOKEN_USAGE } };
   }
 
   const model = process.env.AZURE_OPENAI_DEPLOYMENT!;
@@ -278,25 +294,31 @@ export async function aggregateMeetingThread(
         {
           role: "system",
           content:
-            "Synthesize these related meeting summaries into one tight paragraph (4-6 sentences). Capture the arc of decisions made, open issues, and outstanding actions. Be specific — include names and numbers where present.",
+            "Produce a detailed thread summary (8-12 sentences) synthesizing these related meeting summaries. Preserve all key decisions, action items with owners, deadlines, metrics, and open issues. Capture the arc of discussion across meetings. Be specific — include names, numbers, and commitments.",
         },
         { role: "user", content: context },
       ],
       temperature: TEMPERATURE_PREP,
-      max_tokens: 300,
+      max_tokens: 600,
     })
   );
 
-  return response.choices[0].message.content || "";
+  const tokenUsage: TokenUsage = {
+    promptTokens: response.usage?.prompt_tokens ?? 0,
+    completionTokens: response.usage?.completion_tokens ?? 0,
+    totalTokens: response.usage?.total_tokens ?? 0,
+  };
+
+  return { text: response.choices[0].message.content || "", tokenUsage };
 }
 
 export async function aggregateEmailThread(
   emails: Array<{ subject: string; from: string; date: string; summary: EmailSummary }>
-): Promise<string> {
-  if (emails.length === 0) return "";
+): Promise<{ text: string; tokenUsage: TokenUsage }> {
+  if (emails.length === 0) return { text: "", tokenUsage: { ...ZERO_TOKEN_USAGE } };
   if (emails.length === 1) {
     const e = emails[0];
-    return `${e.subject} from ${e.from}: ${e.summary.summary || ""}`;
+    return { text: `${e.subject} from ${e.from}: ${e.summary.summary || ""}`, tokenUsage: { ...ZERO_TOKEN_USAGE } };
   }
 
   const model = process.env.AZURE_OPENAI_DEPLOYMENT!;
@@ -318,16 +340,22 @@ export async function aggregateEmailThread(
         {
           role: "system",
           content:
-            "Synthesize these related email summaries into one tight paragraph (3-5 sentences). Capture the main topic, overall sentiment, and any pending actions. Be concise and direct.",
+            "Produce a detailed thread summary (6-10 sentences) synthesizing these related email summaries. Preserve action items, deadlines, requests, and specific data points. Capture the main topic, overall sentiment, and the progression of the conversation. Be specific — include names, dates, and concrete details.",
         },
         { role: "user", content: context },
       ],
       temperature: TEMPERATURE_PREP,
-      max_tokens: 250,
+      max_tokens: 500,
     })
   );
 
-  return response.choices[0].message.content || "";
+  const tokenUsage: TokenUsage = {
+    promptTokens: response.usage?.prompt_tokens ?? 0,
+    completionTokens: response.usage?.completion_tokens ?? 0,
+    totalTokens: response.usage?.total_tokens ?? 0,
+  };
+
+  return { text: response.choices[0].message.content || "", tokenUsage };
 }
 
 // ============================================
@@ -351,7 +379,7 @@ export async function summarizeEmail(
     from: string;
     date: string;
   }
-): Promise<EmailSummary> {
+): Promise<{ summary: EmailSummary; tokenUsage: TokenUsage }> {
   const systemPrompt = `You are an email summarizer for enterprise clients.
 
 Extract and structure the following from the email:
@@ -402,13 +430,19 @@ ${emailContent}`;
 
     const parsed = JSON.parse(content) as EmailSummary;
 
+    const tokenUsage: TokenUsage = {
+      promptTokens: response.usage?.prompt_tokens ?? 0,
+      completionTokens: response.usage?.completion_tokens ?? 0,
+      totalTokens: response.usage?.total_tokens ?? 0,
+    };
+
     console.log('Email Summarization:', {
       subject: metadata.subject,
-      tokens: response.usage?.total_tokens ?? 0,
+      tokens: tokenUsage.totalTokens,
       model
     });
 
-    return parsed;
+    return { summary: parsed, tokenUsage };
   } catch (error) {
     console.error("Error summarizing email with OpenAI:", error);
     throw new Error("Failed to generate email summary");
@@ -471,41 +505,48 @@ IMPORTANT: Format your response in proper Markdown:
 
 Be concise but comprehensive. Focus on actionable insights that will help the attendee be well-prepared.`;
 
-  // Use pre-aggregated thread briefs when available (reduce step applied upstream)
-  // This prevents attention dilution when there are many related items.
+  // Build meeting context — when thread briefs exist, include both the overview
+  // AND individual summaries so the final brief retains granular details.
+  const individualMeetingContext = input.relatedMeetingSummaries
+    .map(
+      (m, idx) =>
+        `Meeting ${idx + 1}: ${m.subject} (${new Date(m.date).toLocaleDateString()})\n` +
+        `- Key Decisions: ${m.summary.keyDecisions?.slice(0, 3).join("; ") || "None"}\n` +
+        `- Action Items: ${m.summary.actionItems?.slice(0, 3).map((a) => `${a.owner}: ${a.task}`).join("; ") || "None"}\n` +
+        `- Summary: ${m.summary.fullSummary || "No summary available"}`
+    )
+    .join("\n\n");
+
   let meetingContext: string;
   if (input.meetingThreadBriefs && input.meetingThreadBriefs.length > 0) {
-    meetingContext = input.meetingThreadBriefs
+    const threadOverview = input.meetingThreadBriefs
       .map((brief, i) => `Thread ${i + 1}:\n${brief}`)
       .join("\n\n");
+    meetingContext = `**Thread Overview**\n${threadOverview}\n\n**Detailed Reference**\n${individualMeetingContext}`;
   } else {
-    meetingContext = input.relatedMeetingSummaries
-      .map(
-        (m, idx) =>
-          `Meeting ${idx + 1}: ${m.subject} (${new Date(m.date).toLocaleDateString()})\n` +
-          `- Key Decisions: ${m.summary.keyDecisions?.slice(0, 3).join("; ") || "None"}\n` +
-          `- Action Items: ${m.summary.actionItems?.slice(0, 3).map((a) => `${a.owner}: ${a.task}`).join("; ") || "None"}\n` +
-          `- Summary: ${m.summary.fullSummary || "No summary available"}`
-      )
-      .join("\n\n");
+    meetingContext = individualMeetingContext;
   }
+
+  // Build email context — same approach: both overview and details when available.
+  const individualEmailContext = input.relatedEmailSummaries
+    .map(
+      (e, idx) =>
+        `Email ${idx + 1}: ${e.subject} from ${e.from} (${new Date(e.date).toLocaleDateString()})\n` +
+        `- Sentiment: ${e.summary.sentiment}\n` +
+        `- Key Points: ${e.summary.keyPoints?.slice(0, 3).join("; ") || "None"}\n` +
+        `- Action Items: ${e.summary.actionItems?.join("; ") || "None"}\n` +
+        `- Summary: ${e.summary.summary}`
+    )
+    .join("\n\n");
 
   let emailContext: string;
   if (input.emailThreadBriefs && input.emailThreadBriefs.length > 0) {
-    emailContext = input.emailThreadBriefs
+    const threadOverview = input.emailThreadBriefs
       .map((brief, i) => `Thread ${i + 1}:\n${brief}`)
       .join("\n\n");
+    emailContext = `**Thread Overview**\n${threadOverview}\n\n**Detailed Reference**\n${individualEmailContext}`;
   } else {
-    emailContext = input.relatedEmailSummaries
-      .map(
-        (e, idx) =>
-          `Email ${idx + 1}: ${e.subject} from ${e.from} (${new Date(e.date).toLocaleDateString()})\n` +
-          `- Sentiment: ${e.summary.sentiment}\n` +
-          `- Key Points: ${e.summary.keyPoints?.slice(0, 3).join("; ") || "None"}\n` +
-          `- Action Items: ${e.summary.actionItems?.join("; ") || "None"}\n` +
-          `- Summary: ${e.summary.summary}`
-      )
-      .join("\n\n");
+    emailContext = individualEmailContext;
   }
 
   const channelSection = input.channelContext

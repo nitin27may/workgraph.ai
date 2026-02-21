@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Download,
   Upload,
@@ -20,6 +21,8 @@ import {
   Zap,
   RefreshCw,
   AlertCircle,
+  CalendarCheck,
+  Mail,
 } from "lucide-react";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
@@ -52,6 +55,43 @@ interface UsageStats {
   avgProcessingTimeMs: number;
 }
 
+interface PrepUsageRecord {
+  id: number;
+  meetingSubject: string;
+  meetingDate: string;
+  totalMeetingsAnalyzed: number;
+  meetingsCached: number;
+  meetingsGenerated: number;
+  totalEmailsAnalyzed: number;
+  emailsCached: number;
+  emailsGenerated: number;
+  approach: string;
+  layers: number;
+  reducedMeetingThreads: number;
+  reducedEmailThreads: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  processingTimeMs: number;
+  model: string;
+  inputCost: number;
+  outputCost: number;
+  totalCost: number;
+  createdAt: string;
+  requestedBy: string | null;
+  requestedByEmail: string | null;
+}
+
+interface PrepUsageStats {
+  totalRecords: number;
+  totalTokens: number;
+  totalCost: number;
+  avgTokensPerPrep: number;
+  avgCostPerPrep: number;
+  totalMeetingsAnalyzed: number;
+  totalEmailsAnalyzed: number;
+}
+
 interface Pricing {
   INPUT_COST_PER_1M: number;
   OUTPUT_COST_PER_1M: number;
@@ -69,6 +109,14 @@ export default function UsagePage() {
   const [forbidden, setForbidden] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ message: string; errors: string[] } | null>(null);
+
+  // Prep tab state
+  const [activeTab, setActiveTab] = useState("summarization");
+  const [prepRecords, setPrepRecords] = useState<PrepUsageRecord[]>([]);
+  const [prepStats, setPrepStats] = useState<PrepUsageStats | null>(null);
+  const [prepLoading, setPrepLoading] = useState(false);
+  const [prepLoaded, setPrepLoaded] = useState(false);
+
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
   useEffect(() => {
@@ -105,18 +153,55 @@ export default function UsagePage() {
     }
   }
 
+  async function fetchPrepUsageData() {
+    setPrepLoading(true);
+    try {
+      const response = await fetch("/api/usage?tab=prep");
+      if (response.ok) {
+        const data = await response.json();
+        setPrepRecords(data.records || []);
+        setPrepStats(data.stats || null);
+        if (!pricing && data.pricing) {
+          setPricing(data.pricing);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching prep usage data:", error);
+    } finally {
+      setPrepLoading(false);
+      setPrepLoaded(true);
+    }
+  }
+
+  function handleTabChange(value: string) {
+    setActiveTab(value);
+    if (value === "prep" && !prepLoaded) {
+      fetchPrepUsageData();
+    }
+  }
+
+  async function handleRefresh() {
+    if (activeTab === "prep") {
+      await fetchPrepUsageData();
+    } else {
+      await fetchUsageData();
+    }
+  }
+
   async function handleExport() {
     try {
-      const response = await fetch("/api/usage?format=csv");
+      const url = activeTab === "prep" ? "/api/usage?format=csv&tab=prep" : "/api/usage?format=csv";
+      const response = await fetch(url);
       if (response.ok) {
         const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
+        const blobUrl = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url;
-        a.download = `usage-export-${new Date().toISOString().split("T")[0]}.csv`;
+        a.href = blobUrl;
+        const prefix = activeTab === "prep" ? "prep-usage" : "usage";
+        a.download = `${prefix}-export-${new Date().toISOString().split("T")[0]}.csv`;
         document.body.appendChild(a);
         a.click();
-        window.URL.revokeObjectURL(url);
+        window.URL.revokeObjectURL(blobUrl);
         document.body.removeChild(a);
       }
     } catch (error) {
@@ -146,7 +231,6 @@ export default function UsagePage() {
         errors: result.errors || [],
       });
 
-      // Refresh data
       await fetchUsageData();
     } catch (error) {
       console.error("Error importing usage:", error);
@@ -163,21 +247,27 @@ export default function UsagePage() {
   }
 
   async function handleClearAll() {
+    const label = activeTab === "prep" ? "Meeting Prep" : "Summarization";
     const confirmed = await confirm({
-      title: "Clear All Usage",
-      description: "Are you sure you want to delete ALL usage records? This cannot be undone.",
+      title: `Clear All ${label} Usage`,
+      description: `Are you sure you want to delete ALL ${label.toLowerCase()} usage records? This cannot be undone.`,
       confirmLabel: "Clear All",
       variant: "destructive",
     });
     if (!confirmed) return;
 
     try {
-      const response = await fetch("/api/usage?clearAll=true", {
+      const tabParam = activeTab === "prep" ? "&tab=prep" : "";
+      const response = await fetch(`/api/usage?clearAll=true${tabParam}`, {
         method: "DELETE",
       });
 
       if (response.ok) {
-        await fetchUsageData();
+        if (activeTab === "prep") {
+          await fetchPrepUsageData();
+        } else {
+          await fetchUsageData();
+        }
       }
     } catch (error) {
       console.error("Error clearing usage:", error);
@@ -186,14 +276,19 @@ export default function UsagePage() {
 
   async function handleDeleteRecord(id: number) {
     try {
-      const response = await fetch(`/api/usage?id=${id}`, {
+      const tabParam = activeTab === "prep" ? "&tab=prep" : "";
+      const response = await fetch(`/api/usage?id=${id}${tabParam}`, {
         method: "DELETE",
       });
 
       if (response.ok) {
-        setRecords(records.filter((r) => r.id !== id));
-        // Refresh stats
-        await fetchUsageData();
+        if (activeTab === "prep") {
+          setPrepRecords(prepRecords.filter((r) => r.id !== id));
+          await fetchPrepUsageData();
+        } else {
+          setRecords(records.filter((r) => r.id !== id));
+          await fetchUsageData();
+        }
       }
     } catch (error) {
       console.error("Error deleting record:", error);
@@ -245,6 +340,8 @@ export default function UsagePage() {
     );
   }
 
+  const currentRecords = activeTab === "prep" ? prepRecords : records;
+
   return (
     <>
     <ConfirmDialog />
@@ -256,43 +353,47 @@ export default function UsagePage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">Usage Dashboard</h1>
             <p className="text-muted-foreground mt-2">
-              Track token usage and costs for meeting summarizations
+              Track token usage and costs for meeting summarizations and preparations
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={fetchUsageData}>
+          <Button variant="outline" size="sm" onClick={handleRefresh}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExport} disabled={records.length === 0}>
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={currentRecords.length === 0}>
             <Download className="w-4 h-4 mr-2" />
             Export CSV
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importing}
-          >
-            {importing ? (
-              <Spinner size="sm" className="mr-2" />
-            ) : (
-              <Upload className="w-4 h-4 mr-2" />
-            )}
-            Import CSV
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            onChange={handleImport}
-            className="hidden"
-          />
+          {activeTab === "summarization" && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
+              >
+                {importing ? (
+                  <Spinner size="sm" className="mr-2" />
+                ) : (
+                  <Upload className="w-4 h-4 mr-2" />
+                )}
+                Import CSV
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleImport}
+                className="hidden"
+              />
+            </>
+          )}
           <Button
             variant="destructive"
             size="sm"
             onClick={handleClearAll}
-            disabled={records.length === 0}
+            disabled={currentRecords.length === 0}
           >
             <Trash2 className="w-4 h-4 mr-2" />
             Clear All
@@ -344,182 +445,388 @@ export default function UsagePage() {
         </Card>
       )}
 
-      {/* Stats Grid */}
-      {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <Card className="hover:shadow-md transition-shadow duration-300">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-primary" />
-                Total Summaries
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{formatNumber(stats.totalRecords)}</p>
-            </CardContent>
-          </Card>
-          <Card className="hover:shadow-md transition-shadow duration-300">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <Zap className="w-4 h-4 text-primary" />
-                Total Tokens
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{formatNumber(stats.totalTokens)}</p>
-            </CardContent>
-          </Card>
-          <Card className="hover:shadow-md transition-shadow duration-300">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-success" />
-                Total Cost
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{formatCurrency(stats.totalCost)}</p>
-            </CardContent>
-          </Card>
-          <Card className="hover:shadow-md transition-shadow duration-300">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <FileText className="w-4 h-4 text-primary" />
-                Avg Tokens/Meeting
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{formatNumber(Math.round(stats.avgTokensPerMeeting))}</p>
-            </CardContent>
-          </Card>
-          <Card className="hover:shadow-md transition-shadow duration-300">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-success" />
-                Avg Cost/Meeting
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{formatCurrency(stats.avgCostPerMeeting)}</p>
-            </CardContent>
-          </Card>
-          <Card className="hover:shadow-md transition-shadow duration-300">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <Clock className="w-4 h-4 text-primary" />
-                Avg Processing
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{(stats.avgProcessingTimeMs / 1000).toFixed(2)}s</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
+        <TabsList>
+          <TabsTrigger value="summarization">Summarization</TabsTrigger>
+          <TabsTrigger value="prep">Meeting Prep</TabsTrigger>
+        </TabsList>
 
-      {/* Records Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            Usage Records
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {records.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>No usage records yet.</p>
-              <p className="text-sm mt-2">Summarize a meeting to start tracking usage.</p>
+        {/* Summarization Tab */}
+        <TabsContent value="summarization" className="space-y-6">
+          {/* Stats Grid */}
+          {stats && (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              <Card className="hover:shadow-md transition-shadow duration-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-primary" />
+                    Total Summaries
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{formatNumber(stats.totalRecords)}</p>
+                </CardContent>
+              </Card>
+              <Card className="hover:shadow-md transition-shadow duration-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-primary" />
+                    Total Tokens
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{formatNumber(stats.totalTokens)}</p>
+                </CardContent>
+              </Card>
+              <Card className="hover:shadow-md transition-shadow duration-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <DollarSign className="w-4 h-4 text-success" />
+                    Total Cost
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{formatCurrency(stats.totalCost)}</p>
+                </CardContent>
+              </Card>
+              <Card className="hover:shadow-md transition-shadow duration-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-primary" />
+                    Avg Tokens/Meeting
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{formatNumber(Math.round(stats.avgTokensPerMeeting))}</p>
+                </CardContent>
+              </Card>
+              <Card className="hover:shadow-md transition-shadow duration-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <DollarSign className="w-4 h-4 text-success" />
+                    Avg Cost/Meeting
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{formatCurrency(stats.avgCostPerMeeting)}</p>
+                </CardContent>
+              </Card>
+              <Card className="hover:shadow-md transition-shadow duration-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-primary" />
+                    Avg Processing
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{(stats.avgProcessingTimeMs / 1000).toFixed(2)}s</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Records Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="w-5 h-5" />
+                Usage Records
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {records.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>No usage records yet.</p>
+                  <p className="text-sm mt-2">Summarize a meeting to start tracking usage.</p>
+                </div>
+              ) : (
+                <ScrollArea className="h-[500px]">
+                  <div className="space-y-3">
+                    {records.map((record) => (
+                      <div
+                        key={record.id}
+                        className="p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-medium truncate">{record.meetingSubject}</h4>
+                              <Badge variant="secondary" className="text-xs">
+                                {record.model}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              {formatDate(record.createdAt)}
+                              {record.requestedBy && (
+                                <span className="ml-2">
+                                  {" "}Requested by <span className="font-medium">{record.requestedBy}</span>
+                                </span>
+                              )}
+                            </p>
+                            <div className="flex flex-wrap gap-4 mt-3 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">Duration:</span>{" "}
+                                <span className="font-medium">
+                                  {record.meetingDurationMinutes
+                                    ? `${record.meetingDurationMinutes} min`
+                                    : "N/A"}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Words:</span>{" "}
+                                <span className="font-medium">
+                                  {formatNumber(record.transcriptWordCount)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Processing:</span>{" "}
+                                <span className="font-medium">
+                                  {(record.processingTimeMs / 1000).toFixed(2)}s
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col md:items-end gap-2">
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                              <div className="text-center">
+                                <p className="text-muted-foreground text-xs">Input</p>
+                                <p className="font-medium">{formatNumber(record.promptTokens)}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {formatCurrency(record.inputCost)}
+                                </p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-muted-foreground text-xs">Output</p>
+                                <p className="font-medium">{formatNumber(record.completionTokens)}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {formatCurrency(record.outputCost)}
+                                </p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-muted-foreground text-xs">Total</p>
+                                <p className="font-bold">{formatNumber(record.totalTokens)}</p>
+                                <p className="text-xs font-medium text-success">
+                                  {formatCurrency(record.totalCost)}
+                                </p>
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteRecord(record.id)}
+                              className="text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Meeting Prep Tab */}
+        <TabsContent value="prep" className="space-y-6">
+          {prepLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Spinner size="lg" />
             </div>
           ) : (
-            <ScrollArea className="h-[500px]">
-              <div className="space-y-3">
-                {records.map((record) => (
-                  <div
-                    key={record.id}
-                    className="p-4 border rounded-lg hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-medium truncate">{record.meetingSubject}</h4>
-                          <Badge variant="secondary" className="text-xs">
-                            {record.model}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {formatDate(record.createdAt)}
-                          {record.requestedBy && (
-                            <span className="ml-2">
-                              • Requested by <span className="font-medium">{record.requestedBy}</span>
-                            </span>
-                          )}
-                        </p>
-                        <div className="flex flex-wrap gap-4 mt-3 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">Duration:</span>{" "}
-                            <span className="font-medium">
-                              {record.meetingDurationMinutes
-                                ? `${record.meetingDurationMinutes} min`
-                                : "N/A"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Words:</span>{" "}
-                            <span className="font-medium">
-                              {formatNumber(record.transcriptWordCount)}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Processing:</span>{" "}
-                            <span className="font-medium">
-                              {(record.processingTimeMs / 1000).toFixed(2)}s
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+            <>
+              {/* Prep Stats Grid */}
+              {prepStats && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                  <Card className="hover:shadow-md transition-shadow duration-300">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4 text-primary" />
+                        Total Preps
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold">{formatNumber(prepStats.totalRecords)}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="hover:shadow-md transition-shadow duration-300">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-primary" />
+                        Total Tokens
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold">{formatNumber(prepStats.totalTokens)}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="hover:shadow-md transition-shadow duration-300">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <DollarSign className="w-4 h-4 text-success" />
+                        Total Cost
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold">{formatCurrency(prepStats.totalCost)}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="hover:shadow-md transition-shadow duration-300">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-primary" />
+                        Avg Tokens/Prep
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold">{formatNumber(Math.round(prepStats.avgTokensPerPrep))}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="hover:shadow-md transition-shadow duration-300">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <CalendarCheck className="w-4 h-4 text-primary" />
+                        Meetings Analyzed
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold">{formatNumber(prepStats.totalMeetingsAnalyzed)}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="hover:shadow-md transition-shadow duration-300">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <Mail className="w-4 h-4 text-primary" />
+                        Emails Analyzed
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold">{formatNumber(prepStats.totalEmailsAnalyzed)}</p>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
 
-                      <div className="flex flex-col md:items-end gap-2">
-                        <div className="grid grid-cols-3 gap-4 text-sm">
-                          <div className="text-center">
-                            <p className="text-muted-foreground text-xs">Input</p>
-                            <p className="font-medium">{formatNumber(record.promptTokens)}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {formatCurrency(record.inputCost)}
-                            </p>
-                          </div>
-                          <div className="text-center">
-                            <p className="text-muted-foreground text-xs">Output</p>
-                            <p className="font-medium">{formatNumber(record.completionTokens)}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {formatCurrency(record.outputCost)}
-                            </p>
-                          </div>
-                          <div className="text-center">
-                            <p className="text-muted-foreground text-xs">Total</p>
-                            <p className="font-bold">{formatNumber(record.totalTokens)}</p>
-                            <p className="text-xs font-medium text-success">
-                              {formatCurrency(record.totalCost)}
-                            </p>
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteRecord(record.id)}
-                          className="text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
+              {/* Prep Records Table */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="w-5 h-5" />
+                    Prep Usage Records
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {prepRecords.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                      <p>No prep usage records yet.</p>
+                      <p className="text-sm mt-2">Generate a meeting preparation brief to start tracking usage.</p>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
+                  ) : (
+                    <ScrollArea className="h-[500px]">
+                      <div className="space-y-3">
+                        {prepRecords.map((record) => (
+                          <div
+                            key={record.id}
+                            className="p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                          >
+                            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="font-medium truncate">{record.meetingSubject}</h4>
+                                  <Badge variant="secondary" className="text-xs">
+                                    {record.approach}
+                                  </Badge>
+                                  <Badge variant="outline" className="text-xs">
+                                    {record.model}
+                                  </Badge>
+                                </div>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                  {formatDate(record.createdAt)}
+                                  {record.requestedBy && (
+                                    <span className="ml-2">
+                                      {" "}Requested by <span className="font-medium">{record.requestedBy}</span>
+                                    </span>
+                                  )}
+                                </p>
+                                <div className="flex flex-wrap gap-4 mt-3 text-sm">
+                                  <div>
+                                    <span className="text-muted-foreground">Meetings:</span>{" "}
+                                    <span className="font-medium">
+                                      {record.totalMeetingsAnalyzed} analyzed ({record.meetingsCached} cached)
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Emails:</span>{" "}
+                                    <span className="font-medium">
+                                      {record.totalEmailsAnalyzed} analyzed ({record.emailsCached} cached)
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Processing:</span>{" "}
+                                    <span className="font-medium">
+                                      {(record.processingTimeMs / 1000).toFixed(2)}s
+                                    </span>
+                                  </div>
+                                  {record.layers > 1 && (
+                                    <div>
+                                      <span className="text-muted-foreground">Layers:</span>{" "}
+                                      <span className="font-medium">{record.layers}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col md:items-end gap-2">
+                                <div className="grid grid-cols-3 gap-4 text-sm">
+                                  <div className="text-center">
+                                    <p className="text-muted-foreground text-xs">Input</p>
+                                    <p className="font-medium">{formatNumber(record.promptTokens)}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {formatCurrency(record.inputCost)}
+                                    </p>
+                                  </div>
+                                  <div className="text-center">
+                                    <p className="text-muted-foreground text-xs">Output</p>
+                                    <p className="font-medium">{formatNumber(record.completionTokens)}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {formatCurrency(record.outputCost)}
+                                    </p>
+                                  </div>
+                                  <div className="text-center">
+                                    <p className="text-muted-foreground text-xs">Total</p>
+                                    <p className="font-bold">{formatNumber(record.totalTokens)}</p>
+                                    <p className="text-xs font-medium text-success">
+                                      {formatCurrency(record.totalCost)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDeleteRecord(record.id)}
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  )}
+                </CardContent>
+              </Card>
+            </>
           )}
-        </CardContent>
-      </Card>
+        </TabsContent>
+      </Tabs>
 
       <Separator />
 

@@ -129,8 +129,13 @@ export default function MeetingsPage() {
     }
   }, [status, router]);
 
+  // Load meetings once when session becomes available.
+  // Using a ref to prevent re-fetching when session object reference changes
+  // (e.g. from refetchOnWindowFocus in SessionProvider).
+  const hasFetchedRef = useRef(false);
   useEffect(() => {
-    if (session) {
+    if (session && !hasFetchedRef.current) {
+      hasFetchedRef.current = true;
       loadMeetings();
     }
   }, [session]);

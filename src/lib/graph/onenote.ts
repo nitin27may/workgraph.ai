@@ -23,7 +23,11 @@ export interface OneNotePage {
   title: string;
   createdDateTime: string;
   lastModifiedDateTime: string;
-  webUrl: string;
+  webUrl?: string;
+  links?: {
+    oneNoteClientUrl?: { href: string };
+    oneNoteWebUrl?: { href: string };
+  };
 }
 
 export interface MeetingDataForNote {
