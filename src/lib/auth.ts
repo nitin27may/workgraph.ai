@@ -1,25 +1,40 @@
 import type { NextAuthOptions } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
+import { randomBytes } from "crypto";
+import { tokenCache } from "./token-cache";
 
 async function refreshAccessToken(token: {
-  accessToken?: string;
-  refreshToken?: string;
-  accessTokenExpires?: number;
+  sessionId?: string;
   error?: string;
 }) {
-  try {
-    const url = `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID}/oauth2/v2.0/token`;
+  if (!token.sessionId) {
+    console.error("No session ID for token refresh");
+    return { ...token, error: "RefreshAccessTokenError" };
+  }
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: process.env.AZURE_AD_CLIENT_ID!,
-        client_secret: process.env.AZURE_AD_CLIENT_SECRET!,
-        grant_type: "refresh_token",
-        refresh_token: token.refreshToken!,
-      }),
-    });
+  // Retrieve token data from cache
+  const tokenData = tokenCache.get(token.sessionId);
+  if (!tokenData || !tokenData.refreshToken) {
+    console.error("No refresh token found in cache");
+    return { ...token, error: "RefreshAccessTokenError" };
+  }
+
+  try {
+    const response = await fetch(
+      "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          client_id: process.env.AZURE_AD_CLIENT_ID!,
+          client_secret: process.env.AZURE_AD_CLIENT_SECRET!,
+          grant_type: "refresh_token",
+          refresh_token: tokenData.refreshToken!,
+        }),
+      }
+    );
 
     const refreshedTokens = await response.json();
 
@@ -27,11 +42,17 @@ async function refreshAccessToken(token: {
       throw refreshedTokens;
     }
 
+    // Update cache with refreshed tokens
+    const newTokenData = {
+      accessToken: refreshedTokens.access_token,
+      refreshToken: refreshedTokens.refresh_token ?? tokenData.refreshToken,
+      accessTokenExpires: Date.now() + refreshedTokens.expires_in * 1000,
+    };
+    tokenCache.set(token.sessionId, newTokenData);
+
     return {
       ...token,
-      accessToken: refreshedTokens.access_token,
-      accessTokenExpires: Date.now() + refreshedTokens.expires_in * 1000,
-      refreshToken: refreshedTokens.refresh_token ?? token.refreshToken,
+      error: undefined,
     };
   } catch (error) {
     console.error("Error refreshing access token:", error);
@@ -78,53 +99,73 @@ export const authOptions: NextAuthOptions = {
             "Tasks.ReadWrite",
             // Files
             "Files.Read",
-            "Files.ReadWrite",
-            // OneNote
-            "Notes.ReadWrite",
-            // Teams (teams & channels — requires re-authentication)
-            "Team.ReadBasic.All",
-            "Channel.ReadBasic.All",
-            "ChannelMessage.Read.All",
           ].join(" "),
         },
-      },
-      // Custom profile to avoid network fetch issues
-      profile(profile) {
-        return {
-          id: profile.sub,
-          name: profile.name || profile.preferred_username || profile.email,
-          email: profile.email || profile.preferred_username,
-          image: null,
-        };
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, account, profile }) {
-      // Store access token in JWT
+    async jwt({ token, account, user }) {
+      // Initial sign in - store tokens in cache
       if (account) {
-        token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token;
-        token.accessTokenExpires = account.expires_at;
+        // Generate unique session ID
+        const sessionId = randomBytes(32).toString("hex");
+        token.sessionId = sessionId;
+        token.sub = user?.id || token.sub;
+
+        // Store tokens in server-side cache
+        const tokenData = {
+          accessToken: account.access_token!,
+          refreshToken: account.refresh_token,
+          accessTokenExpires: account.expires_at ? account.expires_at * 1000 : Date.now() + 3600 * 1000,
+        };
+        tokenCache.set(sessionId, tokenData);
       }
 
-      // Return previous token if not expired
-      if (Date.now() < (token.accessTokenExpires as number) * 1000) {
-        return token;
+      // Check if we need to refresh the token
+      const sessionId = token.sessionId as string | undefined;
+      if (sessionId) {
+        const tokenData = tokenCache.get(sessionId);
+        
+        // If no token data in cache or token expired, try to refresh
+        if (!tokenData || Date.now() >= tokenData.accessTokenExpires - 5 * 60 * 1000) {
+          return refreshAccessToken(token);
+        }
       }
 
-      // Access token expired, refresh it
-      return refreshAccessToken(token);
+      return token;
     },
     async session({ session, token }) {
-      // Send access token to client
-      session.accessToken = token.accessToken as string;
+      // Retrieve access token from cache for API calls
+      const sessionId = token.sessionId as string | undefined;
+      if (sessionId) {
+        const tokenData = tokenCache.get(sessionId);
+        if (tokenData) {
+          session.accessToken = tokenData.accessToken;
+        }
+      }
       session.error = token.error as string | undefined;
       return session;
     },
+  },
+  events: {
+    async signOut(message) {
+      // Clean up cached tokens on sign out
+      if ("token" in message && message.token) {
+        const sessionId = message.token.sessionId as string | undefined;
+        if (sessionId) {
+          tokenCache.delete(sessionId);
+        }
+      }
+    },
+  },
+  session: {
+    strategy: "jwt",
+    maxAge: 24 * 60 * 60, // 24 hours
   },
   pages: {
     signIn: "/",
     error: "/auth/error",
   },
+  debug: process.env.NODE_ENV === "development",
 };

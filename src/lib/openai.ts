@@ -570,3 +570,186 @@ Create a comprehensive preparation brief that helps the attendee walk into this 
     throw new Error("Failed to generate preparation brief");
   }
 }
+
+/**
+ * Classify relevance of candidate items to a target meeting using GPT
+ * @param targetMeetingTitle - Title/subject of the meeting being prepared for
+ * @param candidates - Array of candidate items to evaluate
+ * @param sourceType - Type of candidates (meetings, emails, teams, files)
+ * @returns Array of relevance scores with reasoning
+ */
+interface CandidateItem {
+  id: string;
+  title: string;
+  metadata?: string; // Additional context like date, sender, etc.
+}
+
+interface RelevanceScore {
+  id: string;
+  score: number; // 0-100
+  reasoning: string;
+}
+
+export async function classifyRelevance(
+  targetMeetingTitle: string,
+  candidates: CandidateItem[],
+  sourceType: 'meetings' | 'emails' | 'teams' | 'files',
+  keywords?: string
+): Promise<RelevanceScore[]> {
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const startTime = Date.now();
+  const model = process.env.AZURE_OPENAI_COMPLETION_DEPLOYMENT!;
+
+  // Batch candidates into groups of 50 to optimize API calls
+  const batchSize = 50;
+  const batches: CandidateItem[][] = [];
+  
+  for (let i = 0; i < candidates.length; i += batchSize) {
+    batches.push(candidates.slice(i, i + batchSize));
+  }
+
+  const allScores: RelevanceScore[] = [];
+
+  // Build keywords instruction if provided
+  const keywordsInstruction = keywords 
+    ? `\n\nIMPORTANT: The user has specified filter keywords: "${keywords}"
+Items containing ANY of these keywords or related terms should receive a SIGNIFICANT BOOST to their relevance score (+20-30 points).
+Keywords are comma-separated. Match partial keywords too (e.g., "SBA" matches "SBA Portal", "Small Business" matches "Small Business Accelerator").`
+    : '';
+
+  for (const batch of batches) {
+    const candidateList = batch
+      .map((c, idx) => `${idx + 1}. "${c.title}"${c.metadata ? ` (${c.metadata})` : ''}`)
+      .join('\n');
+
+    const systemPrompt = `You are an AI assistant helping to prepare for a meeting by identifying relevant context.
+Your task is to evaluate the relevance of ${sourceType} to the target meeting.
+
+Consider these factors:
+- Topic similarity (keywords, themes, subject matter)
+- People/teams involved
+- Temporal proximity (recent items may be more relevant)
+- Actionable connections (decisions, action items, follow-ups)${keywordsInstruction}
+
+Rate each item on a scale of 0-100:
+- 90-100: Highly relevant, directly related
+- 70-89: Relevant, good supporting context
+- 50-69: Somewhat relevant, tangential connection
+- 30-49: Weak connection, minimal relevance
+- 0-29: Not relevant
+
+Respond with ONLY valid JSON array format:
+[
+  {"id": "item_id", "score": 85, "reasoning": "Brief explanation"},
+  ...
+]`;
+
+    const userPrompt = `Target Meeting: "${targetMeetingTitle}"${keywords ? `\nFilter Keywords: ${keywords}` : ''}
+
+Evaluate the relevance of these ${sourceType}:
+
+${candidateList}
+
+Rate each item and explain your reasoning.`;
+
+    try {
+      const response = await client.chat.completions.create({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        model,
+        temperature: 0.3, // Lower temperature for more consistent scoring
+      });
+
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error("No response from OpenAI");
+      }
+
+      // Parse the response - GPT might wrap it in an object with an array property
+      let parsed: any;
+      try {
+        // Remove potential markdown code fences
+        let cleanContent = content.trim();
+        if (cleanContent.startsWith('```json')) {
+          cleanContent = cleanContent.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+        } else if (cleanContent.startsWith('```')) {
+          cleanContent = cleanContent.replace(/^```\n?/, '').replace(/\n?```$/, '');
+        }
+        
+        parsed = JSON.parse(cleanContent);
+        // Handle different response formats
+        let scores: RelevanceScore[];
+        if (Array.isArray(parsed)) {
+          scores = parsed;
+        } else if (parsed.scores && Array.isArray(parsed.scores)) {
+          scores = parsed.scores;
+        } else if (parsed.results && Array.isArray(parsed.results)) {
+          scores = parsed.results;
+        } else {
+          // Try to extract any array from the response
+          const arrayKey = Object.keys(parsed).find(key => Array.isArray(parsed[key]));
+          scores = arrayKey ? parsed[arrayKey] : [];
+        }
+
+        // Map scores back to original IDs and validate
+        const batchScores = batch.map((candidate, idx) => {
+          const scoreObj = scores.find(s => 
+            String(s.id) === candidate.id || 
+            String(s.id) === String(idx + 1) ||
+            String(s.id) === String(idx)
+          );
+          
+          return {
+            id: candidate.id,
+            score: scoreObj?.score ?? 0,
+            reasoning: scoreObj?.reasoning ?? 'No reasoning provided'
+          };
+        });
+
+        allScores.push(...batchScores);
+
+      } catch (parseError) {
+        console.error("Error parsing relevance scores:", parseError, "Content:", content);
+        // Fallback: assign neutral scores
+        batch.forEach(candidate => {
+          allScores.push({
+            id: candidate.id,
+            score: 50,
+            reasoning: 'Error parsing AI response'
+          });
+        });
+      }
+
+      // Log token usage for this batch
+      const usage = response.usage;
+      if (usage) {
+        console.log(`📊 Relevance Classification (${sourceType}, batch ${batches.indexOf(batch) + 1}/${batches.length}):`, {
+          items: batch.length,
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+          totalTokens: usage.total_tokens,
+          durationMs: Date.now() - startTime
+        });
+      }
+
+    } catch (error) {
+      console.error("Error in classifyRelevance batch:", error);
+      // Fallback: assign neutral scores to this batch
+      batch.forEach(candidate => {
+        allScores.push({
+          id: candidate.id,
+          score: 50,
+          reasoning: 'Error during classification'
+        });
+      });
+    }
+  }
+
+  console.log(`✅ Classified ${allScores.length} ${sourceType} in ${Date.now() - startTime}ms`);
+  return allScores;
+}

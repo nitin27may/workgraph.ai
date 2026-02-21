@@ -44,59 +44,7 @@ import {
   ChevronDown,
   BarChart2,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import { parseUTCDateTime, formatMeetingDate, formatMeetingTime } from "@/lib/dateUtils";
-import { formatSummaryAsMarkdown } from "@/lib/summaryUtils";
-import { getInitials } from "@/lib/utils";
-import { toast } from "sonner";
-import type { MeetingPrep } from "@/lib/graph/meeting-prep";
-
-interface EnhancedPrepStats {
-  totalMeetings: number;
-  meetingsCached: number;
-  meetingsGenerated: number;
-  totalEmails: number;
-  emailsCached: number;
-  emailsGenerated: number;
-  processingTimeMs: number;
-  briefTokenUsage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-  reducedMeetingThreads?: number;
-  reducedEmailThreads?: number;
-}
-
-interface RelatedMeetingSummary {
-  meetingId: string;
-  subject: string;
-  date: string;
-  cached: boolean;
-}
-
-interface RelatedEmailSummary {
-  emailId: string;
-  subject: string;
-  from: string;
-  date: string;
-  cached: boolean;
-}
+import { DiscoveryPanel } from "@/components/meeting-prep/DiscoveryPanel";
 
 export default function MeetingDetailsPage() {
   const { data: session, status } = useSession();
@@ -691,18 +639,12 @@ export default function MeetingDetailsPage() {
                     Meeting Preparation Available
                   </CardTitle>
                   <CardDescription className="mt-1">
-                    We've gathered context about this meeting and attendees
+                    Review and select relevant content from the last 30 days
                   </CardDescription>
                 </div>
-                <Button onClick={() => {
-                  if (!prepBrief) {
-                    generatePrepBrief();
-                  } else {
-                    setActiveTab("preparation");
-                  }
-                }}>
+                <Button onClick={() => setActiveTab("preparation")}>
                   <Sparkles className="mr-2 h-4 w-4" />
-                  {prepBrief ? "View Brief" : "Generate Brief"}
+                  {prepBrief ? "View Brief" : "Start Preparation"}
                 </Button>
               </div>
             </CardHeader>
@@ -957,58 +899,19 @@ export default function MeetingDetailsPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                {!prepBrief && !loadingPrepBrief && (
-                  <div className="text-center py-8">
-                    <Sparkles className="mx-auto mb-4 h-12 w-12 text-primary/50" />
-                    <h3 className="mb-2 text-lg font-medium">
-                      Generate Preparation Brief
-                    </h3>
-                    <p className="mb-6 text-sm text-muted-foreground max-w-md mx-auto">
-                      Generate a comprehensive brief with attendee information, recent email context,
-                      previous meetings, and suggested talking points to help you prepare for this meeting.
-                    </p>
-                    <Button
-                      size="lg"
-                      onClick={generatePrepBrief}
-                      disabled={!meetingPrep}
-                    >
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      Generate Preparation Brief
-                    </Button>
-                    {!meetingPrep && (
-                      <p className="mt-4 text-sm text-destructive">
-                        Loading meeting context...
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {loadingPrepBrief && (
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-3">
-                      <Spinner size="md" />
-                      <div>
-                        <p className="font-medium">Generating preparation brief...</p>
-                        <p className="text-sm text-muted-foreground">
-                          Analyzing meeting context and attendee information
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-6">
-                      <div className="space-y-2">
-                        <Skeleton className="h-4 w-full" />
-                        <Skeleton className="h-4 w-[95%]" />
-                        <Skeleton className="h-4 w-[90%]" />
-                      </div>
-                      <Separator />
-                      <div className="space-y-3">
-                        <Skeleton className="h-4 w-32" />
-                        <Skeleton className="h-3 w-[80%]" />
-                        <Skeleton className="h-3 w-[70%]" />
-                      </div>
-                    </div>
-                  </div>
+                {!prepBrief && (
+                  <DiscoveryPanel
+                    meetingId={meetingId}
+                    onGenerate={(result) => {
+                      setPrepBrief(result.preparationBrief);
+                      setIsEnhancedPrep(true);
+                      setEnhancedPrepStats(result.stats);
+                      if (result.summaries) {
+                        setRelatedMeetingsList(result.summaries.meetings || []);
+                        setRelatedEmailsList(result.summaries.emails || []);
+                      }
+                    }}
+                  />
                 )}
 
                 {prepBrief && (

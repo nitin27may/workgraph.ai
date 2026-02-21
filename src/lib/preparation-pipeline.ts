@@ -66,11 +66,23 @@ export interface PreparationResult {
     reducedMeetingThreads: number;
     reducedEmailThreads: number;
   };
+  approach?: 'single-stage' | 'multi-stage';
+  layers?: number; // Number of summarization layers used
+}
+
+/**
+ * Estimate token count from text (rough approximation)
+ * More accurate would use tiktoken library
+ */
+function estimateTokens(text: string): number {
+  // Rough estimate: 1 token ≈ 4 characters
+  return Math.ceil(text.length / 4);
 }
 
 export async function generateMeetingPreparations(
   context: MeetingPrep,
-  userEmail: string
+  userEmail: string,
+  multiStage: boolean = false
 ): Promise<PreparationResult> {
   const startTime = Date.now();
 
@@ -315,13 +327,105 @@ export async function generateMeetingPreparations(
     channelContext,
   };
 
-  const briefResult = await createPreparationBrief(briefInput);
-  const brief = briefResult.brief;
+  // Estimate total tokens for context
+  const combinedContext = JSON.stringify(briefInput);
+  const estimatedTokens = estimateTokens(combinedContext);
+  const TOKEN_THRESHOLD = 100000; // 100k tokens (adjust as needed)
+
+  let brief: string;
+  let approach: 'single-stage' | 'multi-stage' = 'single-stage';
+  let layers = 1;
+
+  // Determine if multi-stage summarization is needed
+  const shouldUseMultiStage = multiStage && estimatedTokens > TOKEN_THRESHOLD;
+
+  if (shouldUseMultiStage) {
+    console.log(`📊 Large context detected (${estimatedTokens.toLocaleString()} tokens), using multi-stage summarization`);
+    approach = 'multi-stage';
+
+    // Multi-stage approach: Chunk summaries → intermediate summaries → final brief
+    const CHUNK_SIZE = 10; // Process 10 items per chunk
+    const allSummaries = [
+      ...meetingSummaries.map((m) => ({
+        type: 'meeting',
+        content: JSON.stringify(m.summary),
+        metadata: `${m.subject} (${new Date(m.date).toLocaleDateString()})`,
+      })),
+      ...emailSummaries.map((e) => ({
+        type: 'email',
+        content: JSON.stringify(e.summary),
+        metadata: `${e.subject} from ${e.from} (${new Date(e.date).toLocaleDateString()})`,
+      })),
+    ];
+
+    // Layer 1: Create intermediate summaries for chunks
+    const intermediateSummaries: string[] = [];
+    for (let i = 0; i < allSummaries.length; i += CHUNK_SIZE) {
+      const chunk = allSummaries.slice(i, i + CHUNK_SIZE);
+      const chunkText = chunk
+        .map((item) => `${item.metadata}\n${item.content}`)
+        .join('\n\n---\n\n');
+
+      // Create a condensed summary for this chunk
+      const chunkSummary = await createPreparationBrief({
+        upcomingMeeting: briefInput.upcomingMeeting,
+        relatedMeetingSummaries: chunk
+          .filter((c) => c.type === 'meeting')
+          .map((c) => JSON.parse(c.content)),
+        relatedEmailSummaries: chunk
+          .filter((c) => c.type === 'email')
+          .map((c) => JSON.parse(c.content)),
+      });
+
+      intermediateSummaries.push(chunkSummary);
+      console.log(`✓ Generated intermediate summary ${intermediateSummaries.length}/${Math.ceil(allSummaries.length / CHUNK_SIZE)}`);
+    }
+
+    layers = 2;
+
+    // Layer 2: If we still have multiple intermediate summaries, combine them
+    if (intermediateSummaries.length > 1) {
+      console.log(`⚙️  Combining ${intermediateSummaries.length} intermediate summaries into final brief...`);
+
+      // Create a meta-brief from intermediate summaries
+      const metaBriefInput: PreparationBriefInput = {
+        upcomingMeeting: briefInput.upcomingMeeting,
+        relatedMeetingSummaries: intermediateSummaries.map((summary, idx) => ({
+          subject: `Summary Group ${idx + 1}`,
+          date: new Date().toISOString(),
+          summary: {
+            subject: `Summary Group ${idx + 1}`,
+            date: new Date().toISOString(),
+            keyDecisions: [],
+            actionItems: [],
+            metrics: [],
+            nextSteps: [],
+            fullSummary: summary,
+          },
+        })),
+        relatedEmailSummaries: [],
+      };
+
+      brief = await createPreparationBrief(metaBriefInput);
+      console.log(`✓ Final brief created (${layers} layers)`);
+    } else {
+      // Only one intermediate summary, use it as the final brief
+      brief = intermediateSummaries[0];
+    }
+  } else {
+    // Single-stage: Direct summarization
+    if (estimatedTokens > TOKEN_THRESHOLD && !multiStage) {
+      console.log(`⚠️  Large context (${estimatedTokens.toLocaleString()} tokens) but multi-stage disabled. Consider enabling it.`);
+    }
+    brief = await createPreparationBrief(briefInput);
+  }
 
   const processingTimeMs = Date.now() - startTime;
 
   console.log('✅ Preparation pipeline complete:', {
     processingTimeMs,
+    approach,
+    layers,
     meetingsProcessed: meetingSummaries.length,
     emailsProcessed: emailSummaries.length,
     cached: meetingsCached + emailsCached,
@@ -347,6 +451,8 @@ export async function generateMeetingPreparations(
       reducedMeetingThreads: meetingThreadBriefs?.length ?? 0,
       reducedEmailThreads: emailThreadBriefs?.length ?? 0,
     },
+    approach,
+    layers,
   };
 }
 

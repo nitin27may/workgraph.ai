@@ -221,9 +221,22 @@ Transcript:
   db.exec(`CREATE INDEX IF NOT EXISTS idx_meeting_summaries_generatedAt ON meeting_summaries(generatedAt)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_email_summaries_emailId ON email_summaries(emailId)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_email_summaries_generatedAt ON email_summaries(generatedAt)`);
+  
+  // Create discovery_cache table for caching meeting prep discovery results
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS discovery_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      meetingId TEXT NOT NULL UNIQUE,
+      candidates TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      expiresAt TEXT NOT NULL
+    )
+  `);
 
-  _db = db;
-  return _db;
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_discovery_cache_meetingId ON discovery_cache(meetingId)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_discovery_cache_expiresAt ON discovery_cache(expiresAt)`);
+  
+  return db;
 }
 
 export function calculateCost(tokenUsage: TokenUsage): { inputCost: number; outputCost: number; totalCost: number } {
@@ -1084,11 +1097,146 @@ export function clearAllEmailSummaries(): { deleted: number } {
   return { deleted: result.changes };
 }
 
-export function clearAllCachedData(): { meetingsDeleted: number; emailsDeleted: number } {
+export function clearAllCachedData(): { meetingsDeleted: number; emailsDeleted: number; discoveryDeleted: number } {
   const meetingResult = clearAllMeetingSummaries();
   const emailResult = clearAllEmailSummaries();
+  const discoveryResult = clearAllDiscoveryCache();
   return {
     meetingsDeleted: meetingResult.deleted,
-    emailsDeleted: emailResult.deleted
+    emailsDeleted: emailResult.deleted,
+    discoveryDeleted: discoveryResult.deleted
   };
+}
+
+// ============================================
+// Discovery Cache Management
+// ============================================
+
+export interface DiscoveryCacheEntry {
+  id: number;
+  meetingId: string;
+  candidates: any; // Will be JSON parsed
+  createdAt: string;
+  expiresAt: string;
+}
+
+/**
+ * Get cached discovery results for a meeting
+ * @param meetingId - The meeting ID
+ * @returns Cached discovery entry or null if not found or expired
+ */
+export function getDiscoveryCache(meetingId: string): DiscoveryCacheEntry | null {
+  const db = getDb();
+  
+  try {
+    const now = new Date().toISOString();
+    const stmt = db.prepare(`
+      SELECT * FROM discovery_cache 
+      WHERE meetingId = ? AND expiresAt > ?
+    `);
+    
+    const row = stmt.get(meetingId, now) as DiscoveryCacheEntry | undefined;
+    
+    if (row) {
+      // Parse the JSON candidates
+      row.candidates = JSON.parse(row.candidates as any);
+      console.log(`✅ Discovery cache HIT for meeting ${meetingId}`);
+      return row;
+    }
+    
+    console.log(`❌ Discovery cache MISS for meeting ${meetingId}`);
+    return null;
+  } catch (error) {
+    console.error('Error reading discovery cache:', error);
+    return null;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Save discovery results to cache
+ * @param meetingId - The meeting ID
+ * @param candidates - The discovery candidates object
+ * @param ttlMinutes - Time to live in minutes (default: 30)
+ * @returns The created cache entry ID
+ */
+export function saveDiscoveryCache(
+  meetingId: string,
+  candidates: any,
+  ttlMinutes: number = 30
+): number {
+  const db = getDb();
+  
+  try {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
+    
+    // Delete existing cache entry if present
+    db.prepare('DELETE FROM discovery_cache WHERE meetingId = ?').run(meetingId);
+    
+    // Insert new cache entry
+    const stmt = db.prepare(`
+      INSERT INTO discovery_cache (meetingId, candidates, createdAt, expiresAt)
+      VALUES (?, ?, ?, ?)
+    `);
+    
+    const result = stmt.run(
+      meetingId,
+      JSON.stringify(candidates),
+      now.toISOString(),
+      expiresAt.toISOString()
+    );
+    
+    console.log(`💾 Saved discovery cache for meeting ${meetingId} (expires in ${ttlMinutes} minutes)`);
+    return result.lastInsertRowid as number;
+  } catch (error) {
+    console.error('Error saving discovery cache:', error);
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Clear expired discovery cache entries
+ * @returns Number of entries deleted
+ */
+export function clearExpiredDiscoveryCache(): { deleted: number } {
+  const db = getDb();
+  
+  try {
+    const now = new Date().toISOString();
+    const result = db.prepare('DELETE FROM discovery_cache WHERE expiresAt <= ?').run(now);
+    
+    if (result.changes > 0) {
+      console.log(`🧹 Cleared ${result.changes} expired discovery cache entries`);
+    }
+    
+    return { deleted: result.changes };
+  } catch (error) {
+    console.error('Error clearing expired discovery cache:', error);
+    return { deleted: 0 };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Clear all discovery cache entries
+ * @returns Number of entries deleted
+ */
+export function clearAllDiscoveryCache(): { deleted: number } {
+  const db = getDb();
+  
+  try {
+    const result = db.prepare('DELETE FROM discovery_cache').run();
+    console.log(`🧹 Cleared all ${result.changes} discovery cache entries`);
+    return { deleted: result.changes };
+  } catch (error) {
+    console.error('Error clearing discovery cache:', error);
+    return { deleted: 0 };
+  } finally {
+    db.close();
+  }
 }
