@@ -49,10 +49,12 @@ import {
   Check,
   Square,
   CheckSquare,
+  BookOpen,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { parseUTCDateTime, formatMeetingDateTime } from "@/lib/dateUtils";
 import { formatSummaryAsMarkdown, formatSummaryAsHtml } from "@/lib/summaryUtils";
+import { OneNoteSaveDialog, type OneNoteSavePayload } from "@/components/OneNoteSaveDialog";
 
 export default function MeetingsPage() {
   const { data: session, status } = useSession();
@@ -108,6 +110,12 @@ export default function MeetingsPage() {
   const [showSummaryPeopleDropdown, setShowSummaryPeopleDropdown] = useState(false);
   const [searchingSummaryPeople, setSearchingSummaryPeople] = useState(false);
   const [includeAllAttendees, setIncludeAllAttendees] = useState(false);
+
+  // OneNote state
+  const [oneNoteOpen, setOneNoteOpen] = useState(false);
+  const [oneNotePayload, setOneNotePayload] = useState<OneNoteSavePayload | null>(null);
+  const [oneNoteDialogTitle, setOneNoteDialogTitle] = useState<string | undefined>();
+  const [oneNoteDialogDesc, setOneNoteDialogDesc] = useState<string | undefined>();
 
   // Filter meetings based on transcript filter
   const filteredMeetings = useMemo(
@@ -841,7 +849,7 @@ export default function MeetingsPage() {
                               </p>
                             </div>
 
-                            {/* Action buttons - Share and Copy */}
+                            {/* Action buttons - Share, Copy, OneNote */}
                             <div className="flex items-center gap-2 pt-2 border-t border-dashed">
                               <Button
                                 variant="outline"
@@ -878,6 +886,35 @@ export default function MeetingsPage() {
                                     Copy Summary
                                   </>
                                 )}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOneNotePayload({
+                                    mode: "meeting",
+                                    meeting: {
+                                      subject: meeting.subject,
+                                      startDateTime: meeting.startDateTime,
+                                      organizer: meeting.organizer,
+                                      participants: meeting.participants,
+                                    },
+                                    summary: {
+                                      keyDecisions: summary.keyDecisions,
+                                      actionItems: summary.actionItems,
+                                      nextSteps: summary.nextSteps,
+                                      fullSummary: summary.fullSummary,
+                                    },
+                                  });
+                                  setOneNoteDialogTitle("Save Summary to OneNote");
+                                  setOneNoteDialogDesc("Select a notebook and section to save this meeting summary as a OneNote page.");
+                                  setOneNoteOpen(true);
+                                }}
+                              >
+                                <BookOpen className="mr-1 h-3.5 w-3.5" />
+                                Save to OneNote
                               </Button>
                             </div>
 
@@ -981,6 +1018,35 @@ export default function MeetingsPage() {
                                         >
                                           <Share2 className="h-3 w-3" />
                                           <span className="hidden sm:inline ml-1">Share ({selectedActionItems[meetingKey]?.size || 0})</span>
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 text-xs px-2"
+                                          disabled={!selectedActionItems[meetingKey]?.size}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const selected = selectedActionItems[meetingKey];
+                                            if (!selected || selected.size === 0) return;
+                                            const items = summary.actionItems.filter((_, idx) => selected.has(idx));
+                                            setOneNotePayload({
+                                              mode: "actionItems",
+                                              meeting: {
+                                                subject: meeting.subject,
+                                                startDateTime: meeting.startDateTime,
+                                                organizer: meeting.organizer,
+                                                participants: meeting.participants,
+                                              },
+                                              actionItems: items,
+                                            });
+                                            setOneNoteDialogTitle("Save Action Items to OneNote");
+                                            setOneNoteDialogDesc(`Save ${items.length} selected action item${items.length !== 1 ? "s" : ""} to a OneNote page.`);
+                                            setOneNoteOpen(true);
+                                          }}
+                                          title="Save selected action items to OneNote"
+                                        >
+                                          <BookOpen className="h-3 w-3" />
+                                          <span className="hidden sm:inline ml-1">OneNote ({selectedActionItems[meetingKey]?.size || 0})</span>
                                         </Button>
                                       </div>
                                     </div>
@@ -1348,6 +1414,15 @@ export default function MeetingsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* OneNote Save Dialog */}
+        <OneNoteSaveDialog
+          open={oneNoteOpen}
+          onOpenChange={setOneNoteOpen}
+          payload={oneNotePayload}
+          title={oneNoteDialogTitle}
+          description={oneNoteDialogDesc}
+        />
       </main>
     </div>
   );

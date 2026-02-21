@@ -1769,10 +1769,12 @@ export interface MeetingPrep {
     relatedMeetings: (Meeting & { transcript?: string; summary?: any; relevanceScore?: number })[]; // Past meetings with similar topics, their transcripts, and summaries
     recentChats: TeamsChat[];       // Recent chats with attendees
     attendeeInfo: PersonSearchResult[];
+    channelMessages: ChannelMessage[];
   };
   relevance: {
     emailCount: number;
     meetingCount: number;
+    channelMessageCount: number;
     topKeywords: string[];
     confidence: 'high' | 'medium' | 'low';  // Based on amount of related content found
   };
@@ -2495,10 +2497,12 @@ export async function getMeetingPrepContext(
         relatedMeetings: relatedMeetingsWithTranscripts,
         recentChats: recentChats.slice(0, 5),
         attendeeInfo,
+        channelMessages: [],
       },
       relevance: {
         emailCount: relatedEmails.length,
         meetingCount: relatedMeetingsWithTranscripts.length,
+        channelMessageCount: 0,
         topKeywords,
         confidence,
       },

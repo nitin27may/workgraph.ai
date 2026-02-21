@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { withAuth } from "@/lib/api-auth";
 import { 
   getMeetingPrepContext, 
   getUpcomingMeetings,

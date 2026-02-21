@@ -111,6 +111,7 @@ export {
   listPages,
   getPageContent,
   createMeetingNotePage,
+  createActionItemsNotePage,
 } from "./onenote";
 export type {
   OneNoteNotebook,
@@ -118,6 +119,7 @@ export type {
   OneNotePage,
   MeetingDataForNote,
   SummaryDataForNote,
+  ActionItemForNote,
 } from "./onenote";
 
 export {

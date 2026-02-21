@@ -22,6 +22,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Meeting, MeetingSummary, Attendee } from "@/types/meeting";
+import type { MeetingPrep } from "@/lib/graph";
 import {
   ArrowLeft,
   Calendar,
@@ -44,7 +45,46 @@ import {
   ChevronDown,
   BarChart2,
 } from "lucide-react";
+import { toast } from "sonner";
+import { formatSummaryAsMarkdown } from "@/lib/summaryUtils";
+import { parseUTCDateTime, formatMeetingDate, formatMeetingTime } from "@/lib/dateUtils";
+import { getInitials } from "@/lib/utils";
 import { DiscoveryPanel } from "@/components/meeting-prep/DiscoveryPanel";
+import { OneNoteSaveDialog, type OneNoteSavePayload } from "@/components/OneNoteSaveDialog";
+
+interface EnhancedPrepStats {
+  totalMeetings: number;
+  meetingsCached: number;
+  meetingsGenerated: number;
+  totalEmails: number;
+  emailsCached: number;
+  emailsGenerated: number;
+  processingTimeMs: number;
+  briefTokenUsage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  reducedMeetingThreads?: number;
+  reducedEmailThreads?: number;
+}
+
+interface RelatedMeetingSummary {
+  meetingId: string;
+  subject: string;
+  date: string;
+  summary: MeetingSummary;
+  cached: boolean;
+}
+
+interface RelatedEmailSummary {
+  emailId: string;
+  subject: string;
+  from: string;
+  date: string;
+  summary: Record<string, unknown>;
+  cached: boolean;
+}
 
 export default function MeetingDetailsPage() {
   const { data: session, status } = useSession();
@@ -89,13 +129,9 @@ export default function MeetingDetailsPage() {
 
   // OneNote state
   const [oneNoteOpen, setOneNoteOpen] = useState(false);
-  const [oneNoteNotebooks, setOneNoteNotebooks] = useState<Array<{ id: string; displayName: string }>>([]);
-  const [oneNoteSections, setOneNoteSections] = useState<Array<{ id: string; displayName: string }>>([]);
-  const [selectedNotebook, setSelectedNotebook] = useState<string>("");
-  const [selectedSection, setSelectedSection] = useState<string>("");
-  const [loadingNotebooks, setLoadingNotebooks] = useState(false);
-  const [loadingSections, setLoadingSections] = useState(false);
-  const [savingToOneNote, setSavingToOneNote] = useState(false);
+  const [oneNotePayload, setOneNotePayload] = useState<OneNoteSavePayload | null>(null);
+  const [oneNoteDialogTitle, setOneNoteDialogTitle] = useState<string | undefined>();
+  const [oneNoteDialogDesc, setOneNoteDialogDesc] = useState<string | undefined>();
 
   // Active tab
   const [activeTab, setActiveTab] = useState("details");
@@ -368,78 +404,43 @@ export default function MeetingDetailsPage() {
     }
   }
 
-  async function openOneNoteDialog() {
+  function openOneNoteSummaryDialog() {
+    if (!meeting || !summary) return;
+    setOneNotePayload({
+      mode: "meeting",
+      meeting: {
+        subject: meeting.subject,
+        startDateTime: meeting.startDateTime,
+        organizer: meeting.organizer,
+        participants: meeting.participants,
+      },
+      summary: {
+        keyDecisions: summary.keyDecisions,
+        actionItems: summary.actionItems,
+        nextSteps: summary.nextSteps,
+        fullSummary: summary.fullSummary,
+      },
+    });
+    setOneNoteDialogTitle("Save Summary to OneNote");
+    setOneNoteDialogDesc("Select a notebook and section to save this meeting summary as a structured OneNote page.");
     setOneNoteOpen(true);
-    if (oneNoteNotebooks.length === 0) {
-      setLoadingNotebooks(true);
-      try {
-        const res = await fetch("/api/onenote?resource=notebooks");
-        const data = await res.json();
-        setOneNoteNotebooks(data.notebooks || []);
-      } catch {
-        toast.error("Failed to load OneNote notebooks.");
-      } finally {
-        setLoadingNotebooks(false);
-      }
-    }
   }
 
-  async function onNotebookChange(notebookId: string) {
-    setSelectedNotebook(notebookId);
-    setSelectedSection("");
-    setOneNoteSections([]);
-    setLoadingSections(true);
-    try {
-      const res = await fetch(`/api/onenote?resource=sections&notebookId=${notebookId}`);
-      const data = await res.json();
-      setOneNoteSections(data.sections || []);
-    } catch {
-      toast.error("Failed to load sections.");
-    } finally {
-      setLoadingSections(false);
-    }
-  }
-
-  async function saveToOneNote() {
-    if (!meeting || !summary || !selectedSection) return;
-    setSavingToOneNote(true);
-    try {
-      const res = await fetch("/api/onenote", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sectionId: selectedSection,
-          meeting: {
-            subject: meeting.subject,
-            startDateTime: meeting.startDateTime,
-            organizer: meeting.organizer,
-            participants: meeting.participants,
-          },
-          summary: {
-            keyDecisions: summary.keyDecisions,
-            actionItems: summary.actionItems,
-            nextSteps: summary.nextSteps,
-            fullSummary: summary.fullSummary,
-          },
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error("Save failed");
-      }
-
-      const data = await res.json();
-      toast.success("Meeting summary saved to OneNote.");
-      setOneNoteOpen(false);
-
-      if (data.page?.webUrl) {
-        window.open(data.page.webUrl, "_blank", "noopener,noreferrer");
-      }
-    } catch {
-      toast.error("Failed to save to OneNote. Please try again.");
-    } finally {
-      setSavingToOneNote(false);
-    }
+  function openOneNoteActionItemsDialog() {
+    if (!meeting || !summary) return;
+    setOneNotePayload({
+      mode: "actionItems",
+      meeting: {
+        subject: meeting.subject,
+        startDateTime: meeting.startDateTime,
+        organizer: meeting.organizer,
+        participants: meeting.participants,
+      },
+      actionItems: summary.actionItems,
+    });
+    setOneNoteDialogTitle("Save Action Items to OneNote");
+    setOneNoteDialogDesc("Select a notebook and section to save the action items as a OneNote page.");
+    setOneNoteOpen(true);
   }
 
   function formatDuration(start: string, end: string): string {
@@ -1222,7 +1223,7 @@ export default function MeetingDetailsPage() {
                         )}
                         {summaryCopied ? "Copied!" : "Copy Summary"}
                       </Button>
-                      <Button variant="outline" size="sm" onClick={openOneNoteDialog}>
+                      <Button variant="outline" size="sm" onClick={openOneNoteSummaryDialog}>
                         <BookOpen className="mr-2 h-4 w-4" />
                         Save to OneNote
                       </Button>
@@ -1352,10 +1353,20 @@ export default function MeetingDetailsPage() {
 
                     {summary.actionItems.length > 0 && (
                       <div>
-                        <h4 className="mb-3 flex items-center gap-2 font-semibold">
-                          <Target className="h-4 w-4 text-primary" />
-                          Action Items
-                        </h4>
+                        <div className="mb-3 flex items-center justify-between">
+                          <h4 className="flex items-center gap-2 font-semibold">
+                            <Target className="h-4 w-4 text-primary" />
+                            Action Items
+                          </h4>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={openOneNoteActionItemsDialog}
+                          >
+                            <BookOpen className="mr-2 h-4 w-4" />
+                            Save to OneNote
+                          </Button>
+                        </div>
                         <ul className="space-y-2 text-sm">
                           {summary.actionItems.map((item, i) => (
                             <li key={i} className="rounded-md bg-muted p-3">
@@ -1416,95 +1427,13 @@ export default function MeetingDetailsPage() {
       </main>
 
       {/* OneNote Save Dialog */}
-      <Dialog open={oneNoteOpen} onOpenChange={setOneNoteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <BookOpen className="h-5 w-5" />
-              Save to OneNote
-            </DialogTitle>
-            <DialogDescription>
-              Select a notebook and section to save this meeting summary as a structured OneNote page.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>Notebook</Label>
-              {loadingNotebooks ? (
-                <Skeleton className="h-10 w-full" />
-              ) : (
-                <Select value={selectedNotebook} onValueChange={onNotebookChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a notebook..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {oneNoteNotebooks.map((nb) => (
-                      <SelectItem key={nb.id} value={nb.id}>
-                        {nb.displayName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label>Section</Label>
-              {loadingSections ? (
-                <Skeleton className="h-10 w-full" />
-              ) : (
-                <Select
-                  value={selectedSection}
-                  onValueChange={setSelectedSection}
-                  disabled={!selectedNotebook || oneNoteSections.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={
-                        !selectedNotebook
-                          ? "Select a notebook first"
-                          : oneNoteSections.length === 0
-                          ? "No sections found"
-                          : "Select a section..."
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {oneNoteSections.map((sec) => (
-                      <SelectItem key={sec.id} value={sec.id}>
-                        {sec.displayName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOneNoteOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={saveToOneNote}
-              disabled={!selectedSection || savingToOneNote}
-            >
-              {savingToOneNote ? (
-                <>
-                  <Spinner size="sm" className="mr-2" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <BookOpen className="mr-2 h-4 w-4" />
-                  Save Page
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <OneNoteSaveDialog
+        open={oneNoteOpen}
+        onOpenChange={setOneNoteOpen}
+        payload={oneNotePayload}
+        title={oneNoteDialogTitle}
+        description={oneNoteDialogDesc}
+      />
     </div>
   );
 }

@@ -19,7 +19,7 @@ import {
   type EmailSummary,
   type PreparationBriefInput,
 } from "./openai";
-import { getSubjectSimilarity } from "./graph";
+import { getSubjectSimilarity } from "./graph/helpers";
 import {
   saveMeetingSummary,
   getMeetingSummaryByMeetingId,
@@ -332,7 +332,10 @@ export async function generateMeetingPreparations(
   const estimatedTokens = estimateTokens(combinedContext);
   const TOKEN_THRESHOLD = 100000; // 100k tokens (adjust as needed)
 
-  let brief: string;
+  let briefResult: { brief: string; tokenUsage: { promptTokens: number; completionTokens: number; totalTokens: number } } = {
+    brief: '',
+    tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+  };
   let approach: 'single-stage' | 'multi-stage' = 'single-stage';
   let layers = 1;
 
@@ -362,9 +365,6 @@ export async function generateMeetingPreparations(
     const intermediateSummaries: string[] = [];
     for (let i = 0; i < allSummaries.length; i += CHUNK_SIZE) {
       const chunk = allSummaries.slice(i, i + CHUNK_SIZE);
-      const chunkText = chunk
-        .map((item) => `${item.metadata}\n${item.content}`)
-        .join('\n\n---\n\n');
 
       // Create a condensed summary for this chunk
       const chunkSummary = await createPreparationBrief({
@@ -377,7 +377,7 @@ export async function generateMeetingPreparations(
           .map((c) => JSON.parse(c.content)),
       });
 
-      intermediateSummaries.push(chunkSummary);
+      intermediateSummaries.push(chunkSummary.brief);
       console.log(`✓ Generated intermediate summary ${intermediateSummaries.length}/${Math.ceil(allSummaries.length / CHUNK_SIZE)}`);
     }
 
@@ -406,18 +406,18 @@ export async function generateMeetingPreparations(
         relatedEmailSummaries: [],
       };
 
-      brief = await createPreparationBrief(metaBriefInput);
+      briefResult = await createPreparationBrief(metaBriefInput);
       console.log(`✓ Final brief created (${layers} layers)`);
     } else {
       // Only one intermediate summary, use it as the final brief
-      brief = intermediateSummaries[0];
+      briefResult = { brief: intermediateSummaries[0], tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
     }
   } else {
     // Single-stage: Direct summarization
     if (estimatedTokens > TOKEN_THRESHOLD && !multiStage) {
       console.log(`⚠️  Large context (${estimatedTokens.toLocaleString()} tokens) but multi-stage disabled. Consider enabling it.`);
     }
-    brief = await createPreparationBrief(briefInput);
+    briefResult = await createPreparationBrief(briefInput);
   }
 
   const processingTimeMs = Date.now() - startTime;
@@ -436,7 +436,7 @@ export async function generateMeetingPreparations(
   });
 
   return {
-    brief,
+    brief: briefResult.brief,
     meetingSummaries,
     emailSummaries,
     stats: {

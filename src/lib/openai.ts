@@ -656,7 +656,7 @@ ${candidateList}
 Rate each item and explain your reasoning.`;
 
     try {
-      const response = await client.chat.completions.create({
+      const response = await getOpenAIClient().chat.completions.create({
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
