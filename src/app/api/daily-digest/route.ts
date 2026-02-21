@@ -1,28 +1,10 @@
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
 import { getDailyDigest } from "@/lib/graph";
-import { isUserAuthorized } from "@/lib/db";
+import { withAuth } from "@/lib/api-auth";
 
-export async function GET() {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Check if user is authorized to use the app
-  const { authorized } = isUserAuthorized(session.user?.email);
-  if (!authorized) {
-    return NextResponse.json(
-      { error: "Forbidden - You are not authorized to use this application" },
-      { status: 403 }
-    );
-  }
-
+export const GET = withAuth(async (_request: NextRequest, session) => {
   try {
     const digest = await getDailyDigest(session.accessToken);
-
     return NextResponse.json(digest);
   } catch (error) {
     console.error("Error fetching daily digest:", error);
@@ -31,4 +13,4 @@ export async function GET() {
       { status: 500 }
     );
   }
-}
+});

@@ -11,7 +11,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Edit, Trash2, Star, Globe, Database } from "lucide-react";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import { toast } from "sonner";
 
 interface PromptTemplate {
@@ -30,6 +32,7 @@ interface PromptTemplate {
 export default function SettingsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [clearingCache, setClearingCache] = useState(false);
@@ -129,7 +132,13 @@ Transcript:
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this prompt?")) return;
+    const confirmed = await confirm({
+      title: "Delete Prompt",
+      description: "Are you sure you want to delete this prompt?",
+      confirmLabel: "Delete",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
 
     try {
       const response = await fetch(`/api/prompts/${id}`, {
@@ -167,7 +176,13 @@ Transcript:
   };
 
   const handleClearCache = async () => {
-    if (!confirm("Are you sure you want to clear all cached meeting and email summaries? This action cannot be undone.")) return;
+    const confirmed = await confirm({
+      title: "Clear Cache",
+      description: "Are you sure you want to clear all cached meeting and email summaries? This action cannot be undone.",
+      confirmLabel: "Clear Cache",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
 
     setClearingCache(true);
     try {
@@ -199,6 +214,8 @@ Transcript:
   }
 
   return (
+    <>
+    <ConfirmDialog />
     <div className="container mx-auto max-w-6xl px-4 py-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Settings</h1>
@@ -415,14 +432,12 @@ Transcript:
                 />
               </div>
               <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   id="isDefault"
                   checked={formData.isDefault}
-                  onChange={(e) =>
-                    setFormData({ ...formData, isDefault: e.target.checked })
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, isDefault: checked === true })
                   }
-                  className="h-4 w-4 rounded border-gray-300"
                 />
                 <Label htmlFor="isDefault" className="cursor-pointer">
                   Set as default prompt
@@ -441,5 +456,6 @@ Transcript:
         </DialogContent>
       </Dialog>
     </div>
+    </>
   );
 }

@@ -3,7 +3,9 @@
 import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import ReactMarkdown from "react-markdown";
+import dynamic from "next/dynamic";
+
+const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false });
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -39,6 +41,36 @@ import {
   UserX,
   Mail,
 } from "lucide-react";
+import { parseUTCDateTime, formatMeetingDate, formatMeetingTime } from "@/lib/dateUtils";
+import { formatSummaryAsMarkdown } from "@/lib/summaryUtils";
+import { getInitials } from "@/lib/utils";
+import { toast } from "sonner";
+import type { MeetingPrep } from "@/lib/graph/meeting-prep";
+
+interface EnhancedPrepStats {
+  totalMeetings: number;
+  meetingsCached: number;
+  meetingsGenerated: number;
+  totalEmails: number;
+  emailsCached: number;
+  emailsGenerated: number;
+  processingTimeMs: number;
+}
+
+interface RelatedMeetingSummary {
+  meetingId: string;
+  subject: string;
+  date: string;
+  cached: boolean;
+}
+
+interface RelatedEmailSummary {
+  emailId: string;
+  subject: string;
+  from: string;
+  date: string;
+  cached: boolean;
+}
 
 export default function MeetingDetailsPage() {
   const { data: session, status } = useSession();
@@ -52,7 +84,7 @@ export default function MeetingDetailsPage() {
   const [meetingNotFound, setMeetingNotFound] = useState(false);
   const [meetingLoaded, setMeetingLoaded] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState("Loading meeting details...");
-  const [meetingPrep, setMeetingPrep] = useState<any>(null);
+  const [meetingPrep, setMeetingPrep] = useState<MeetingPrep | null>(null);
   const [loadingPrep, setLoadingPrep] = useState(false);
 
   // Attendance state
@@ -69,16 +101,17 @@ export default function MeetingDetailsPage() {
   // Summary state
   const [summary, setSummary] = useState<MeetingSummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  const [streamingText, setStreamingText] = useState<string>("");
   const [summaryCopied, setSummaryCopied] = useState(false);
 
   // Preparation brief state
   const [prepBrief, setPrepBrief] = useState<string | null>(null);
   const [loadingPrepBrief, setLoadingPrepBrief] = useState(false);
   const [prepBriefCopied, setPrepBriefCopied] = useState(false);
-  const [enhancedPrepStats, setEnhancedPrepStats] = useState<any>(null);
+  const [enhancedPrepStats, setEnhancedPrepStats] = useState<EnhancedPrepStats | null>(null);
   const [isEnhancedPrep, setIsEnhancedPrep] = useState(false);
-  const [relatedMeetingsList, setRelatedMeetingsList] = useState<any[]>([]);
-  const [relatedEmailsList, setRelatedEmailsList] = useState<any[]>([]);
+  const [relatedMeetingsList, setRelatedMeetingsList] = useState<RelatedMeetingSummary[]>([]);
+  const [relatedEmailsList, setRelatedEmailsList] = useState<RelatedEmailSummary[]>([]);
 
   // Active tab
   const [activeTab, setActiveTab] = useState("details");
@@ -246,8 +279,10 @@ export default function MeetingDetailsPage() {
     if (!meeting) return;
 
     setLoadingSummary(true);
+    setStreamingText("");
+
     try {
-      const response = await fetch("/api/summarize", {
+      const response = await fetch("/api/summarize/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -262,11 +297,47 @@ export default function MeetingDetailsPage() {
         throw new Error("Failed to generate summary");
       }
 
-      const summaryData = await response.json();
-      setSummary(summaryData);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let eventType = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7).trim();
+          } else if (line.startsWith("data: ") && eventType) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (eventType === "summary") {
+                setStreamingText(prev => prev + data.delta);
+              } else if (eventType === "structured") {
+                setSummary(data as MeetingSummary);
+                setStreamingText("");
+              } else if (eventType === "error") {
+                throw new Error(data.message);
+              }
+            } catch (e) {
+              if (e instanceof SyntaxError) continue;
+              throw e;
+            }
+            eventType = "";
+          }
+        }
+      }
     } catch (error) {
       console.error("Error generating summary:", error);
-      alert("Failed to generate summary. Please try again.");
+      setStreamingText("");
+      toast.error("Failed to generate summary. Please try again.");
     } finally {
       setLoadingSummary(false);
     }
@@ -282,26 +353,7 @@ export default function MeetingDetailsPage() {
 
   function copySummary() {
     if (summary) {
-      const text = `
-# ${summary.subject}
-Date: ${new Date(summary.date).toLocaleDateString()}
-
-## Summary
-${summary.fullSummary}
-
-## Key Decisions
-${summary.keyDecisions.map((d) => `- ${d}`).join("\n")}
-
-## Action Items
-${summary.actionItems.map((a) => `- ${a.owner}: ${a.task}${a.deadline ? ` (Due: ${a.deadline})` : ""}`).join("\n")}
-
-## Key Metrics
-${summary.metrics.map((m) => `- ${m}`).join("\n")}
-
-## Next Steps
-${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
-      `.trim();
-      navigator.clipboard.writeText(text);
+      navigator.clipboard.writeText(formatSummaryAsMarkdown(summary));
       setSummaryCopied(true);
       setTimeout(() => setSummaryCopied(false), 2000);
     }
@@ -318,7 +370,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
       
     } catch (error) {
       console.error('Error generating preparation brief:', error);
-      alert('Failed to generate preparation brief. Please try again.');
+      toast.error('Failed to generate preparation brief. Please try again.');
     } finally {
       setLoadingPrepBrief(false);
     }
@@ -330,42 +382,6 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
       setPrepBriefCopied(true);
       setTimeout(() => setPrepBriefCopied(false), 2000);
     }
-  }
-
-  function getInitials(name: string): string {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-  }
-
-  // Format datetime from Graph API (comes as local time without timezone)
-  function parseUTCDateTime(dateTimeString: string): Date {
-    // Graph API returns datetime in UTC without timezone suffix
-    // Add 'Z' to explicitly parse as UTC, then it will display in user's local timezone
-    const cleanedString = dateTimeString.replace(/\.\d+$/, ""); // Remove trailing decimals
-    return new Date(cleanedString + "Z");
-  }
-
-  function formatMeetingDate(dateTimeString: string): string {
-    const date = parseUTCDateTime(dateTimeString);
-    return date.toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-  }
-
-  function formatMeetingTime(dateTimeString: string): string {
-    const date = parseUTCDateTime(dateTimeString);
-    return date.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
   }
 
   function formatDuration(start: string, end: string): string {
@@ -527,7 +543,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                 ) : (
                   <>
                     {new Date(meeting.startDateTime) > new Date() && (
-                      <Badge variant="default" className="bg-blue-500">
+                      <Badge variant="default" className="bg-info">
                         <Clock className="h-3 w-3 mr-1" />
                         Upcoming
                       </Badge>
@@ -681,7 +697,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                   <>
                     <div>
                       <h4 className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                        <UserCheck className="h-4 w-4 text-green-600" />
+                        <UserCheck className="h-4 w-4 text-success" />
                         Joined Meeting ({actualAttendees.length})
                       </h4>
                       {loadingAttendance ? (
@@ -701,10 +717,10 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                           {actualAttendees.map((attendee, index) => (
                             <div
                               key={index}
-                              className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950 p-3"
+                              className="flex items-center gap-3 rounded-lg border border-success/30 bg-success/5 p-3"
                             >
                               <Avatar className="h-8 w-8">
-                                <AvatarFallback className="text-xs bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                                <AvatarFallback className="text-xs bg-success/10 text-success">
                                   {getInitials(attendee.emailAddress.name)}
                                 </AvatarFallback>
                               </Avatar>
@@ -764,8 +780,8 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                             className={`flex items-center gap-3 rounded-lg border p-3 ${
                               actualAttendees.length > 0
                                 ? attended
-                                  ? "border-green-200 bg-green-50/50 dark:border-green-900 dark:bg-green-950/50"
-                                  : "border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/50"
+                                  ? "border-success/30 bg-success/5"
+                                  : "border-destructive/30 bg-destructive/5"
                                 : ""
                             }`}
                           >
@@ -773,8 +789,8 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                               <AvatarFallback className={`text-xs ${
                                 actualAttendees.length > 0
                                   ? attended
-                                    ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
-                                    : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
+                                    ? "bg-success/10 text-success"
+                                    : "bg-destructive/10 text-destructive"
                                   : ""
                               }`}>
                                 {getInitials(attendee.emailAddress.name)}
@@ -790,9 +806,9 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                             </div>
                             {actualAttendees.length > 0 && (
                               attended ? (
-                                <UserCheck className="h-4 w-4 text-green-600" />
+                                <UserCheck className="h-4 w-4 text-success" />
                               ) : (
-                                <UserX className="h-4 w-4 text-red-500" />
+                                <UserX className="h-4 w-4 text-destructive" />
                               )
                             )}
                           </div>
@@ -907,7 +923,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                                 Related Meetings ({relatedMeetingsList.length})
                               </h4>
                               <div className="space-y-1.5">
-                                {relatedMeetingsList.map((meeting: any, idx: number) => {
+                                {relatedMeetingsList.map((meeting, idx) => {
                                   const meetingDate = meeting.date ? new Date(meeting.date) : null;
                                   const formattedDate = meetingDate 
                                     ? meetingDate.toLocaleDateString('en-US', { 
@@ -945,7 +961,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                                 Related Emails ({relatedEmailsList.length})
                               </h4>
                               <div className="space-y-1.5">
-                                {relatedEmailsList.map((email: any, idx: number) => {
+                                {relatedEmailsList.map((email, idx) => {
                                   const emailDate = email.date ? new Date(email.date) : null;
                                   const formattedDate = emailDate 
                                     ? emailDate.toLocaleDateString('en-US', { 
@@ -1204,53 +1220,62 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                       <div>
                         <p className="font-medium">Generating summary...</p>
                         <p className="text-sm text-muted-foreground">
-                          Analyzing transcript and extracting key insights
+                          {streamingText ? "Streaming response..." : "Analyzing transcript and extracting key insights"}
                         </p>
                       </div>
                     </div>
 
-                    <div className="space-y-6">
-                      <div className="space-y-2">
-                        <Skeleton className="h-4 w-full" />
-                        <Skeleton className="h-4 w-[95%]" />
-                        <Skeleton className="h-4 w-[90%]" />
-                        <Skeleton className="h-4 w-[85%]" />
+                    {streamingText ? (
+                      <div>
+                        <p className="text-sm leading-relaxed">
+                          {streamingText}
+                          <span className="inline-block w-1.5 h-4 bg-primary/60 animate-pulse ml-0.5 align-text-bottom" />
+                        </p>
                       </div>
-
-                      <Separator />
-
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Skeleton className="h-4 w-4 rounded-full" />
-                          <Skeleton className="h-4 w-32" />
+                    ) : (
+                      <div className="space-y-6">
+                        <div className="space-y-2">
+                          <Skeleton className="h-4 w-full" />
+                          <Skeleton className="h-4 w-[95%]" />
+                          <Skeleton className="h-4 w-[90%]" />
+                          <Skeleton className="h-4 w-[85%]" />
                         </div>
-                        <Skeleton className="h-3 w-[80%]" />
-                        <Skeleton className="h-3 w-[70%]" />
-                        <Skeleton className="h-3 w-[75%]" />
-                      </div>
 
-                      <Separator />
+                        <Separator />
 
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Skeleton className="h-4 w-4 rounded-full" />
-                          <Skeleton className="h-4 w-28" />
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="h-4 w-4 rounded-full" />
+                            <Skeleton className="h-4 w-32" />
+                          </div>
+                          <Skeleton className="h-3 w-[80%]" />
+                          <Skeleton className="h-3 w-[70%]" />
+                          <Skeleton className="h-3 w-[75%]" />
                         </div>
-                        <Skeleton className="h-12 w-full rounded-md" />
-                        <Skeleton className="h-12 w-full rounded-md" />
-                      </div>
 
-                      <Separator />
+                        <Separator />
 
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Skeleton className="h-4 w-4 rounded-full" />
-                          <Skeleton className="h-4 w-24" />
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="h-4 w-4 rounded-full" />
+                            <Skeleton className="h-4 w-28" />
+                          </div>
+                          <Skeleton className="h-12 w-full rounded-md" />
+                          <Skeleton className="h-12 w-full rounded-md" />
                         </div>
-                        <Skeleton className="h-3 w-[60%]" />
-                        <Skeleton className="h-3 w-[65%]" />
+
+                        <Separator />
+
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="h-4 w-4 rounded-full" />
+                            <Skeleton className="h-4 w-24" />
+                          </div>
+                          <Skeleton className="h-3 w-[60%]" />
+                          <Skeleton className="h-3 w-[65%]" />
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 )}
 
@@ -1267,7 +1292,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                     {summary.keyDecisions.length > 0 && (
                       <div>
                         <h4 className="mb-3 flex items-center gap-2 font-semibold">
-                          <CheckCircle className="h-4 w-4 text-green-600" />
+                          <CheckCircle className="h-4 w-4 text-success" />
                           Key Decisions
                         </h4>
                         <ul className="space-y-2 text-sm">
@@ -1284,7 +1309,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                     {summary.actionItems.length > 0 && (
                       <div>
                         <h4 className="mb-3 flex items-center gap-2 font-semibold">
-                          <Target className="h-4 w-4 text-blue-600" />
+                          <Target className="h-4 w-4 text-primary" />
                           Action Items
                         </h4>
                         <ul className="space-y-2 text-sm">
@@ -1306,7 +1331,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                     {summary.metrics.length > 0 && (
                       <div>
                         <h4 className="mb-3 flex items-center gap-2 font-semibold">
-                          <TrendingUp className="h-4 w-4 text-purple-600" />
+                          <TrendingUp className="h-4 w-4 text-primary" />
                           Key Metrics
                         </h4>
                         <ul className="space-y-2 text-sm">
@@ -1323,7 +1348,7 @@ ${summary.nextSteps.map((s) => `- ${s}`).join("\n")}
                     {summary.nextSteps.length > 0 && (
                       <div>
                         <h4 className="mb-3 flex items-center gap-2 font-semibold">
-                          <ArrowRight className="h-4 w-4 text-orange-600" />
+                          <ArrowRight className="h-4 w-4 text-muted-foreground" />
                           Next Steps
                         </h4>
                         <ul className="space-y-2 text-sm">

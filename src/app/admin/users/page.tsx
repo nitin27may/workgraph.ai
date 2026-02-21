@@ -8,6 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Users,
   UserPlus,
@@ -24,6 +27,7 @@ import {
   Mail,
   Calendar,
 } from "lucide-react";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface AuthorizedUser {
   id: number;
@@ -53,6 +57,7 @@ export default function AdminUsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<{ message: string; errors: string[] } | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -160,7 +165,13 @@ export default function AdminUsersPage() {
   }
 
   async function handleDeleteUser(id: number, email: string) {
-    if (!confirm(`Are you sure you want to delete ${email}?`)) return;
+    const confirmed = await confirm({
+      title: "Delete User",
+      description: `Are you sure you want to delete ${email}?`,
+      confirmLabel: "Delete",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
 
     try {
       const response = await fetch(`/api/users?id=${id}`, {
@@ -252,8 +263,8 @@ export default function AdminUsersPage() {
       <div className="container mx-auto p-6 flex items-center justify-center min-h-[60vh]">
         <Card className="max-w-md w-full">
           <CardContent className="pt-6 text-center space-y-4">
-            <div className="w-16 h-16 mx-auto bg-red-100 rounded-full flex items-center justify-center">
-              <Shield className="w-8 h-8 text-red-600" />
+            <div className="w-16 h-16 mx-auto bg-destructive/10 rounded-full flex items-center justify-center">
+              <Shield className="w-8 h-8 text-destructive" />
             </div>
             <h2 className="text-xl font-semibold">Access Denied</h2>
             <p className="text-muted-foreground">
@@ -274,6 +285,8 @@ export default function AdminUsersPage() {
   const adminCount = users.filter((u) => u.role === "admin").length;
 
   return (
+    <>
+    <ConfirmDialog />
     <div className="container mx-auto p-6 max-w-5xl space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -322,8 +335,8 @@ export default function AdminUsersPage() {
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <Users className="w-5 h-5 text-blue-600" />
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <Users className="w-5 h-5 text-primary" />
               </div>
               <div>
                 <p className="text-2xl font-bold">{users.length}</p>
@@ -335,8 +348,8 @@ export default function AdminUsersPage() {
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-100 rounded-lg">
-                <UserCheck className="w-5 h-5 text-green-600" />
+              <div className="p-2 bg-success/10 rounded-lg">
+                <UserCheck className="w-5 h-5 text-success" />
               </div>
               <div>
                 <p className="text-2xl font-bold">{activeUsers.length}</p>
@@ -348,8 +361,8 @@ export default function AdminUsersPage() {
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-purple-100 rounded-lg">
-                <ShieldCheck className="w-5 h-5 text-purple-600" />
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <ShieldCheck className="w-5 h-5 text-primary" />
               </div>
               <div>
                 <p className="text-2xl font-bold">{adminCount}</p>
@@ -362,38 +375,42 @@ export default function AdminUsersPage() {
 
       {/* Messages */}
       {error && (
-        <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto hover:text-red-900">×</button>
-        </div>
+        <Alert variant="destructive">
+          <AlertCircle className="w-4 h-4" />
+          <AlertDescription className="flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError(null)} aria-label="Dismiss" className="ml-auto hover:text-destructive/80">×</button>
+          </AlertDescription>
+        </Alert>
       )}
 
       {success && (
-        <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
-          <CheckCircle className="w-4 h-4 flex-shrink-0" />
-          <span>{success}</span>
-          <button onClick={() => setSuccess(null)} className="ml-auto hover:text-green-900">×</button>
-        </div>
+        <Alert className="border-success/30 bg-success/10 text-success">
+          <CheckCircle className="w-4 h-4" />
+          <AlertDescription className="flex items-center justify-between">
+            <span>{success}</span>
+            <button onClick={() => setSuccess(null)} aria-label="Dismiss" className="ml-auto hover:text-success/80">×</button>
+          </AlertDescription>
+        </Alert>
       )}
 
       {importResult && (
-        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
-          <div className="flex items-center gap-2 text-blue-700">
-            <Upload className="w-4 h-4" />
+        <Alert className="border-info/30 bg-info/10 text-info">
+          <Upload className="w-4 h-4" />
+          <AlertDescription>
             <span className="font-medium">{importResult.message}</span>
-          </div>
-          {importResult.errors.length > 0 && (
-            <ul className="mt-2 text-xs text-red-600 list-disc list-inside">
-              {importResult.errors.slice(0, 5).map((err, i) => (
-                <li key={i}>{err}</li>
-              ))}
-              {importResult.errors.length > 5 && (
-                <li>...and {importResult.errors.length - 5} more errors</li>
-              )}
-            </ul>
-          )}
-        </div>
+            {importResult.errors.length > 0 && (
+              <ul className="mt-2 text-xs text-destructive list-disc list-inside">
+                {importResult.errors.slice(0, 5).map((err, i) => (
+                  <li key={i}>{err}</li>
+                ))}
+                {importResult.errors.length > 5 && (
+                  <li>...and {importResult.errors.length - 5} more errors</li>
+                )}
+              </ul>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
 
       {/* Add User Form */}
@@ -407,38 +424,41 @@ export default function AdminUsersPage() {
         <CardContent>
           <form onSubmit={handleAddUser} className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1">
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                Email <span className="text-red-500">*</span>
-              </label>
-              <input
+              <Label htmlFor="add-user-email" className="text-xs font-medium text-muted-foreground mb-1 block">
+                Email <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="add-user-email"
                 type="email"
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
                 placeholder="user@company.com"
-                className="w-full h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="h-9"
                 required
               />
             </div>
             <div className="flex-1">
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              <Label htmlFor="add-user-name" className="text-xs font-medium text-muted-foreground mb-1 block">
                 Name
-              </label>
-              <input
+              </Label>
+              <Input
+                id="add-user-name"
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="John Doe"
-                className="w-full h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="h-9"
               />
             </div>
             <div className="w-full sm:w-28">
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              <Label htmlFor="add-user-role" className="text-xs font-medium text-muted-foreground mb-1 block">
                 Role
-              </label>
+              </Label>
               <select
+                id="add-user-role"
                 value={newRole}
                 onChange={(e) => setNewRole(e.target.value as "admin" | "user")}
-                className="w-full h-9 px-2 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full h-9 px-2 text-sm border border-input rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring/20"
               >
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
@@ -481,9 +501,9 @@ export default function AdminUsersPage() {
                   >
                     {/* Avatar */}
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium ${
-                      user.role === "admin" 
-                        ? "bg-purple-100 text-purple-700" 
-                        : "bg-blue-100 text-blue-700"
+                      user.role === "admin"
+                        ? "bg-primary/10 text-primary"
+                        : "bg-muted text-muted-foreground"
                     }`}>
                       {(user.name || user.email).charAt(0).toUpperCase()}
                     </div>
@@ -561,5 +581,6 @@ export default function AdminUsersPage() {
         CSV format: email, name (optional), role (optional: user/admin)
       </p>
     </div>
+    </>
   );
 }

@@ -21,6 +21,7 @@ import {
   RefreshCw,
   AlertCircle,
 } from "lucide-react";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 interface UsageRecord {
   id: number;
@@ -68,6 +69,7 @@ export default function UsagePage() {
   const [forbidden, setForbidden] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ message: string; errors: string[] } | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -161,9 +163,13 @@ export default function UsagePage() {
   }
 
   async function handleClearAll() {
-    if (!confirm("Are you sure you want to delete ALL usage records? This cannot be undone.")) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Clear All Usage",
+      description: "Are you sure you want to delete ALL usage records? This cannot be undone.",
+      confirmLabel: "Clear All",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
 
     try {
       const response = await fetch("/api/usage?clearAll=true", {
@@ -240,6 +246,8 @@ export default function UsagePage() {
   }
 
   return (
+    <>
+    <ConfirmDialog />
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/30">
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
       {/* Header */}
@@ -295,12 +303,12 @@ export default function UsagePage() {
 
       {/* Import Result */}
       {importResult && (
-        <Card className={importResult.errors.length > 0 ? "border-yellow-500" : "border-green-500"}>
+        <Card className={importResult.errors.length > 0 ? "border-warning" : "border-success"}>
           <CardContent className="pt-4">
             <div className="flex items-start gap-3">
               <AlertCircle
                 className={`w-5 h-5 ${
-                  importResult.errors.length > 0 ? "text-yellow-500" : "text-green-500"
+                  importResult.errors.length > 0 ? "text-warning" : "text-success"
                 }`}
               />
               <div>
@@ -490,7 +498,7 @@ export default function UsagePage() {
                           <div className="text-center">
                             <p className="text-muted-foreground text-xs">Total</p>
                             <p className="font-bold">{formatNumber(record.totalTokens)}</p>
-                            <p className="text-xs font-medium text-green-600 dark:text-green-400">
+                            <p className="text-xs font-medium text-success">
                               {formatCurrency(record.totalCost)}
                             </p>
                           </div>
@@ -520,5 +528,6 @@ export default function UsagePage() {
       </p>
       </main>
     </div>
+    </>
   );
 }

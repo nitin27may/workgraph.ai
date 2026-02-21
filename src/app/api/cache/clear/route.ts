@@ -1,29 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { clearAllCachedData, isAdmin } from "@/lib/db";
+import { clearAllCachedData } from "@/lib/db";
+import { withAdminAuth } from "@/lib/api-auth";
 
-export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Only admins can clear cache
-  const adminCheck = isAdmin(session.user?.email || '');
-  if (!adminCheck) {
-    return NextResponse.json(
-      { error: "Forbidden - Only administrators can clear cache" },
-      { status: 403 }
-    );
-  }
-
+export const POST = withAdminAuth(async (_request: NextRequest) => {
   try {
     const result = clearAllCachedData();
-    
-    console.log('🗑️ Cache cleared:', result);
-    
+
+    console.log('Cache cleared:', result);
+
     return NextResponse.json({
       success: true,
       message: "Cache cleared successfully",
@@ -36,4 +20,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

@@ -23,6 +23,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { MICROSOFT_TODO_URL, OUTLOOK_URL } from "@/lib/constants";
 
 interface Meeting {
   id: string;
@@ -116,9 +117,9 @@ interface DigestSectionProps {
 
 function DigestSection({ title, count, icon: Icon, variant = "default", children }: DigestSectionProps) {
   const variantStyles = {
-    default: "border-slate-200",
-    warning: "border-amber-200 bg-amber-50/50",
-    info: "border-blue-200 bg-blue-50/50",
+    default: "border-border",
+    warning: "border-warning/30 bg-warning/5",
+    info: "border-info/30 bg-info/5",
   };
 
   return (
@@ -156,7 +157,7 @@ function MeetingCard({ meeting }: { meeting: Meeting }) {
   return (
     <Link
       href={`/meetings/${meeting.id}`}
-      className={`block p-4 rounded-lg border transition-all hover:border-primary hover:shadow-md cursor-pointer ${isUpcoming ? "border-primary bg-primary/5" : "border-slate-200"}`}
+      className={`block p-4 rounded-lg border transition-all hover:border-primary hover:shadow-md cursor-pointer ${isUpcoming ? "border-primary bg-primary/5" : "border-border"}`}
     >
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-2">
@@ -208,7 +209,7 @@ function EmailCard({ email }: { email: FlaggedEmail | EmailMessage }) {
   const isRecent = (new Date().getTime() - receivedTime.getTime()) / (1000 * 60 * 60) < 24;
 
   return (
-    <div className="p-4 rounded-lg border border-slate-200 transition-all hover:border-primary hover:shadow-sm">
+    <div className="p-4 rounded-lg border border-border transition-all hover:border-primary hover:shadow-sm">
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-2">
           <h3 className="font-semibold">{email.subject}</h3>
@@ -231,13 +232,13 @@ function TaskCard({ task }: { task: TodoTask }) {
   const isOverdue = dueDate && dueDate < new Date();
 
   return (
-    <div className={`p-4 rounded-lg border transition-all hover:border-primary hover:shadow-sm ${isOverdue ? "border-red-200 bg-red-50/50" : "border-slate-200"}`}>
+    <div className={`p-4 rounded-lg border transition-all hover:border-primary hover:shadow-sm ${isOverdue ? "border-destructive/30 bg-destructive/5" : "border-border"}`}>
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-2">
           <h3 className="font-semibold">{task.title}</h3>
           <div className="flex gap-1">
             {isHighPriority && <Badge variant="destructive" className="flex-shrink-0">High Priority</Badge>}
-            {isOverdue && <Badge variant="outline" className="flex-shrink-0 border-red-300 text-red-700">Overdue</Badge>}
+            {isOverdue && <Badge variant="outline" className="flex-shrink-0 border-destructive/40 text-destructive">Overdue</Badge>}
           </div>
         </div>
         {task.listName && (
@@ -257,7 +258,7 @@ function ActionItemCard({ item }: { item: ActionItem }) {
   const meetingDate = new Date(item.meetingDate);
   
   return (
-    <div className="p-4 rounded-lg border border-slate-200 transition-all hover:border-primary hover:shadow-sm">
+    <div className="p-4 rounded-lg border border-border transition-all hover:border-primary hover:shadow-sm">
       <div className="space-y-2">
         <p className="font-medium">{item.text}</p>
         <p className="text-sm text-muted-foreground">
@@ -299,10 +300,6 @@ export default function DigestPage() {
     fetchDigest();
   }, []);
 
-  useEffect(() => {
-    fetchDigest();
-  }, []);
-
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleDateString("en-US", {
@@ -316,7 +313,7 @@ export default function DigestPage() {
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto p-6 space-y-6">
-        <div className="bg-white rounded-lg border border-slate-200 p-6">
+        <div className="bg-card rounded-lg border border-border p-6">
           <Skeleton className="h-8 w-64 mb-2" />
           <Skeleton className="h-4 w-48" />
         </div>
@@ -363,14 +360,14 @@ export default function DigestPage() {
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-lg border border-slate-200 p-6">
+      <div className="bg-card rounded-lg border border-border p-6">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900 flex items-center gap-2">
+            <h1 className="text-2xl font-semibold text-foreground flex items-center gap-2">
               <Sparkles className="h-6 w-6 text-primary" />
               Good morning! Here&apos;s your day ahead
             </h1>
-            <p className="text-slate-600 mt-1">
+            <p className="text-muted-foreground mt-1">
               {formatDate(digest.date)}
             </p>
           </div>
@@ -455,13 +452,13 @@ export default function DigestPage() {
             </Link>
           </Button>
           <Button variant="outline" className="justify-start" asChild>
-            <a href="https://to-do.office.com/tasks/inbox" target="_blank" rel="noopener noreferrer">
+            <a href={MICROSOFT_TODO_URL} target="_blank" rel="noopener noreferrer">
               <CheckSquare className="h-4 w-4 mr-2" />
               Microsoft To Do
             </a>
           </Button>
           <Button variant="outline" className="justify-start" asChild>
-            <a href="https://outlook.office.com/mail" target="_blank" rel="noopener noreferrer">
+            <a href={OUTLOOK_URL} target="_blank" rel="noopener noreferrer">
               <Mail className="h-4 w-4 mr-2" />
               Outlook
             </a>
