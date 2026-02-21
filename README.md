@@ -87,15 +87,15 @@ A one-stop solution for employees to start their workday with complete context -
 
 ## Tech Stack
 
-- **Framework**: Next.js 15 (App Router with React 19)
+- **Framework**: Next.js 16 (App Router with React 19)
 - **Styling**: Tailwind CSS 4 + Shadcn UI
 - **Authentication**: NextAuth.js v4 with Azure AD
-- **APIs**: 
-  - Microsoft Graph API (Meetings, Mail, Tasks, Calendar, OneDrive, Chats)
+- **APIs**:
+  - Microsoft Graph API (Meetings, Mail, Tasks, Calendar, OneDrive, Chats, OneNote, Teams)
   - Azure OpenAI (GPT-4o for summaries and insights)
 - **Database**: SQLite (better-sqlite3) - Migration to PostgreSQL + pgvector planned
 - **Language**: TypeScript 5
-- **Deployment**: Docker support with docker-compose
+- **Deployment**: Docker support with docker compose
 
 ## Microsoft Graph API Scopes Used
 
@@ -103,18 +103,25 @@ Current implementation uses the following Graph API permissions:
 
 ### Delegated Permissions (User Context)
 - `User.Read` - Read user profile
+- `User.ReadBasic.All` - Read basic profiles of all users in the organization
+- `People.Read` - Search for people in organization
 - `Calendars.Read` - Read user calendar and meetings
+- `Calendars.ReadWrite` - Read and write user calendar
 - `OnlineMeetings.Read` - Access online meeting details
-- `CallRecords.Read` - Read call records (for transcripts)
+- `CallRecordings.Read.All` - Read call recordings
 - `OnlineMeetingTranscript.Read.All` - Access meeting transcripts
 - `Mail.Read` - Read user emails
 - `Mail.ReadWrite` - Manage email flags and properties
 - `Mail.Send` - Send emails
-- `Tasks.ReadWrite` - Access and manage Microsoft To-Do tasks
-- `People.Read` - Search for people in organization
 - `Chat.Read` - Read Teams chat messages
-- `Files.Read.All` - Read OneDrive and SharePoint files
-- `Sites.Read.All` - Access SharePoint sites
+- `ChatMessage.Send` - Send Teams chat messages
+- `Tasks.ReadWrite` - Access and manage Microsoft To-Do tasks
+- `Files.Read` - Read OneDrive files
+- `Files.ReadWrite` - Read and write OneDrive files
+- `Notes.ReadWrite` - Read and write OneNote notebooks
+- `Team.ReadBasic.All` - List joined teams
+- `Channel.ReadBasic.All` - List channels in a team
+- `ChannelMessage.Read.All` - Read channel messages
 
 ## Getting Started
 
@@ -124,7 +131,7 @@ Current implementation uses the following Graph API permissions:
 
 2. **Azure OpenAI** deployment with GPT-4o or GPT-4 model
 
-3. **Node.js** 18+ and npm/yarn
+3. **Node.js** 18+ and npm
 
 ### Setup
 
@@ -171,26 +178,20 @@ Current implementation uses the following Graph API permissions:
 
 ### Docker Setup (Recommended for Production)
 
-1. **Quick Start** - Use the startup script:
-   ```bash
-   ./start.sh
-   ```
+```bash
+# Build and start
+docker compose up -d
 
-2. **Manual Docker Compose**:
-   ```bash
-   # Build and start
-   docker-compose up -d
-   
-   # View logs
-   docker-compose logs -f
-   
-   # Stop
-   docker-compose down
-   ```
+# View logs
+docker compose logs -f
 
-3. Access at [http://localhost:3300](http://localhost:3300)
+# Stop
+docker compose down
+```
 
-See [DOCKER.md](./DOCKER.md) for detailed Docker deployment instructions.
+Access at [http://localhost:3300](http://localhost:3300)
+
+**Important**: Update `NEXTAUTH_URL` in `.env.local` to your production domain before deploying.
 
 ## Project Structure
 
@@ -209,6 +210,8 @@ src/
 │   │   ├── daily-digest/            # Morning dashboard data
 │   │   ├── digest-summary/          # AI-generated digest
 │   │   ├── email-followups/         # Flagged emails
+│   │   ├── onenote/                 # OneNote notebooks and pages
+│   │   ├── teams/                   # Teams and channel messages
 │   │   ├── prompts/                 # Custom AI prompts (admin)
 │   │   ├── usage/                   # Usage analytics
 │   │   ├── users/                   # User management
@@ -228,43 +231,39 @@ src/
 │   └── theme-toggle.tsx             # Dark/light mode switch
 ├── lib/
 │   ├── auth.ts                      # NextAuth config
+│   ├── api-auth.ts                  # withAuth() route wrapper
 │   ├── db.ts                        # SQLite database operations
-│   ├── graph.ts                     # Microsoft Graph API client (2200+ lines)
-│   │                                # - Meetings, Transcripts, Attendance
-│   │                                # - Email, Tasks, Calendar
-│   │                                # - OneDrive, Chats, People
+│   ├── graph/                       # Microsoft Graph API modules
+│   │   ├── client.ts                # Graph client factory
+│   │   ├── index.ts                 # Re-exports all graph modules
+│   │   ├── calendar.ts              # Calendar events
+│   │   ├── meetings.ts              # Online meetings & transcripts
+│   │   ├── meeting-prep.ts          # Meeting preparation context
+│   │   ├── email.ts                 # Mail read/send
+│   │   ├── chat.ts                  # Teams chat messages
+│   │   ├── tasks.ts                 # Microsoft To-Do
+│   │   ├── people.ts                # People search
+│   │   ├── files.ts                 # OneDrive files
+│   │   ├── onenote.ts               # OneNote notebooks/pages
+│   │   ├── teams.ts                 # Teams & channels
+│   │   ├── digest.ts                # Daily digest aggregation
+│   │   └── helpers.ts               # Shared utilities
 │   ├── openai.ts                    # Azure OpenAI integration
+│   ├── openai-stream.ts             # Streaming summarization
+│   ├── openai-retry.ts              # Retry logic for OpenAI calls
 │   ├── preparation-pipeline.ts      # Meeting prep AI pipeline
+│   ├── validations.ts               # Zod schemas for API routes
+│   ├── summaryUtils.ts              # Summary formatting utilities
+│   ├── constants.ts                 # App-wide constants
+│   ├── dateUtils.ts                 # Date formatting helpers
 │   └── utils.ts                     # Utility functions
 └── types/
     ├── meeting.ts                   # Type definitions
     └── next-auth.d.ts               # NextAuth extensions
 ```
 
-## Deployment
-
-### Local Development
-```bash
-npm install
-npm run dev
-# Open http://localhost:3300
-```
-
-### Docker (Recommended for Production)
-```bash
-# Quick start
-./start.sh
-
-# Or manual docker-compose
-docker-compose up -d --build
-docker-compose logs -f
-```
-
-**Important**: Update `NEXTAUTH_URL` in `.env.local` to your production domain before deploying.
-
 ## Related Documentation
 
-- [Shadcn UI Enhancement Plan](./docs/SHADCN_UI_ENHANCEMENT_PLAN.md) - Comprehensive plan to enhance UI with professional components
 - [Vector DB Enhancement Plan](./docs/vector-db-enhancement.md) - Detailed plan for PostgreSQL + pgvector migration
 - [Features Roadmap](./docs/FEATURES_ROADMAP.md) - Upcoming features and enhancements
 
@@ -275,24 +274,3 @@ This is an internal application. For feature requests or issues, please contact 
 ## License
 
 Proprietary - Internal Use Only
-
-See [DOCKER.md](./DOCKER.md) for complete Docker deployment guide.
-
-### Vercel
-
-```bash
-npm i -g vercel
-vercel
-```
-
-Set environment variables in the Vercel dashboard. Update port to 3300 in your configuration.
-
-## License
-
-MIT
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
