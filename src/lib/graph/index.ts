@@ -104,3 +104,26 @@ export type { DailyDigest, ActionItem } from "./digest";
 
 export { getMeetingPrepContext } from "./meeting-prep";
 export type { MeetingPrep } from "./meeting-prep";
+
+export {
+  listNotebooks,
+  listSections,
+  listPages,
+  getPageContent,
+  createMeetingNotePage,
+} from "./onenote";
+export type {
+  OneNoteNotebook,
+  OneNoteSection,
+  OneNotePage,
+  MeetingDataForNote,
+  SummaryDataForNote,
+} from "./onenote";
+
+export {
+  getJoinedTeams,
+  getTeamChannels,
+  getChannelMessages,
+  searchChannelMessages,
+} from "./teams";
+export type { Team, TeamChannel, ChannelMessage } from "./teams";

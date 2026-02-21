@@ -18,6 +18,8 @@ import { getRecentChatsWithPeople } from "./chat";
 import type { TeamsChat } from "./chat";
 import { searchPeople } from "./people";
 import type { PersonSearchResult } from "./people";
+import { getJoinedTeams, searchChannelMessages } from "./teams";
+import type { ChannelMessage } from "./teams";
 
 export interface MeetingPrep {
   meeting: Meeting;
@@ -26,10 +28,12 @@ export interface MeetingPrep {
     relatedMeetings: (Meeting & { transcript?: string; summary?: Record<string, unknown>; relevanceScore?: number })[];
     recentChats: TeamsChat[];
     attendeeInfo: PersonSearchResult[];
+    channelMessages: ChannelMessage[];
   };
   relevance: {
     emailCount: number;
     meetingCount: number;
+    channelMessageCount: number;
     topKeywords: string[];
     confidence: 'high' | 'medium' | 'low';
   };
@@ -191,6 +195,26 @@ export async function getMeetingPrepContext(
       }
     }
 
+    // Search Teams channel messages for meeting keywords (best-effort — requires new scopes)
+    let channelMessages: ChannelMessage[] = [];
+    if (topKeywords.length > 0) {
+      try {
+        const teams = await getJoinedTeams(accessToken);
+        // Search up to 3 teams to avoid throttling
+        const teamSample = teams.slice(0, 3);
+        const channelResults = await Promise.all(
+          teamSample.map((team) =>
+            searchChannelMessages(accessToken, team.id, topKeywords, 5).catch(() => [])
+          )
+        );
+        channelMessages = channelResults.flat().slice(0, 10);
+        console.log(`Found ${channelMessages.length} relevant channel messages`);
+      } catch (err) {
+        // Scope may not be granted yet — log and continue
+        console.warn("Could not fetch Teams channel messages (scope may be pending re-auth):", err);
+      }
+    }
+
     // Get context in parallel
     const [recentChats, allMeetings] = await Promise.all([
       getRecentChatsWithPeople(accessToken, attendeeEmails),
@@ -264,7 +288,7 @@ export async function getMeetingPrepContext(
     const attendeeInfo = attendeeResults.filter((p): p is PersonSearchResult => p !== null);
 
     // Calculate confidence based on related content found
-    const totalRelatedCount = relatedEmails.length + relatedMeetings.length;
+    const totalRelatedCount = relatedEmails.length + relatedMeetings.length + channelMessages.length;
     let confidence: 'high' | 'medium' | 'low';
     if (totalRelatedCount >= 10) {
       confidence = 'high';
@@ -281,10 +305,12 @@ export async function getMeetingPrepContext(
         relatedMeetings: relatedMeetingsWithTranscripts,
         recentChats: recentChats.slice(0, 5),
         attendeeInfo,
+        channelMessages,
       },
       relevance: {
         emailCount: relatedEmails.length,
         meetingCount: relatedMeetingsWithTranscripts.length,
+        channelMessageCount: channelMessages.length,
         topKeywords,
         confidence,
       },

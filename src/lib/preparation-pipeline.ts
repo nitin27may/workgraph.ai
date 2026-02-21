@@ -11,12 +11,15 @@
 import type { MeetingPrep } from "./graph";
 import type { MeetingSummary } from "@/types/meeting";
 import {
-  summarizeTranscript,
+  summarizeTranscriptInChunks,
   summarizeEmail,
+  aggregateMeetingThread,
+  aggregateEmailThread,
   createPreparationBrief,
   type EmailSummary,
   type PreparationBriefInput,
 } from "./openai";
+import { getSubjectSimilarity } from "./graph";
 import {
   saveMeetingSummary,
   getMeetingSummaryByMeetingId,
@@ -55,6 +58,13 @@ export interface PreparationResult {
     emailsCached: number;
     emailsGenerated: number;
     processingTimeMs: number;
+    briefTokenUsage: {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+    };
+    reducedMeetingThreads: number;
+    reducedEmailThreads: number;
   };
 }
 
@@ -77,6 +87,9 @@ export async function generateMeetingPreparations(
   let meetingsCached = 0;
   let meetingsGenerated = 0;
 
+  // Transcript length threshold for chunked summarization (~4k tokens ≈ 12k chars)
+  const LONG_TRANSCRIPT_THRESHOLD = 12000;
+
   for (const meeting of context.context.relatedMeetings) {
     try {
       // Check cache first
@@ -96,9 +109,13 @@ export async function generateMeetingPreparations(
       } else {
         // Generate new summary only if transcript exists
         if (meeting.transcript && meeting.transcript.trim().length > 0) {
-          console.log(`⚙️ Generating summary for: ${meeting.subject}`);
-          
-          const result = await summarizeTranscript(
+          const isLong = meeting.transcript.length > LONG_TRANSCRIPT_THRESHOLD;
+          console.log(
+            `⚙️ Generating summary for: ${meeting.subject} (${meeting.transcript.length} chars${isLong ? ' — chunked' : ''})`
+          );
+
+          // Use chunked summarization for long transcripts to prevent key detail loss
+          const result = await summarizeTranscriptInChunks(
             meeting.transcript,
             meeting.subject,
             meeting.startDateTime,
@@ -199,7 +216,89 @@ export async function generateMeetingPreparations(
   }
 
   // ============================================
-  // Step 3: Generate Comprehensive Preparation Brief
+  // Step 3: Reduce — Aggregate when item count is high
+  // Groups related meeting/email summaries into thread briefs to prevent
+  // attention dilution in the final brief generation call.
+  // ============================================
+
+  const MEETING_REDUCE_THRESHOLD = 3;
+  const EMAIL_REDUCE_THRESHOLD = 5;
+
+  const rawMeetingSummaries = meetingSummaries.map((m) => ({
+    subject: m.subject,
+    date: context.context.relatedMeetings.find((rm) => rm.id === m.meetingId)?.startDateTime || '',
+    summary: m.summary,
+  }));
+
+  const rawEmailSummaries = emailSummaries.map((e) => ({
+    subject: e.subject,
+    from: e.summary.from,
+    date: e.summary.date,
+    summary: e.summary,
+  }));
+
+  let meetingThreadBriefs: string[] | undefined;
+  let emailThreadBriefs: string[] | undefined;
+
+  // Reduce meeting summaries into thread briefs when above threshold
+  if (rawMeetingSummaries.length > MEETING_REDUCE_THRESHOLD) {
+    console.log(`⚙️ Reducing ${rawMeetingSummaries.length} meeting summaries via thread aggregation...`);
+
+    // Cluster by subject similarity (greedy single-pass)
+    const used = new Set<number>();
+    const groups: typeof rawMeetingSummaries[] = [];
+
+    for (let i = 0; i < rawMeetingSummaries.length; i++) {
+      if (used.has(i)) continue;
+      const group = [rawMeetingSummaries[i]];
+      used.add(i);
+      for (let j = i + 1; j < rawMeetingSummaries.length; j++) {
+        if (used.has(j)) continue;
+        if (getSubjectSimilarity(rawMeetingSummaries[i].subject, rawMeetingSummaries[j].subject) >= 0.2) {
+          group.push(rawMeetingSummaries[j]);
+          used.add(j);
+        }
+      }
+      groups.push(group);
+    }
+
+    meetingThreadBriefs = await Promise.all(groups.map((g) => aggregateMeetingThread(g)));
+    console.log(`✓ Reduced to ${meetingThreadBriefs.length} meeting thread briefs`);
+  }
+
+  // Reduce email summaries into thread briefs when above threshold
+  if (rawEmailSummaries.length > EMAIL_REDUCE_THRESHOLD) {
+    console.log(`⚙️ Reducing ${rawEmailSummaries.length} email summaries via sender grouping...`);
+
+    // Group by sender
+    const senderGroups = new Map<string, typeof rawEmailSummaries>();
+    for (const email of rawEmailSummaries) {
+      const key = email.from.toLowerCase();
+      if (!senderGroups.has(key)) senderGroups.set(key, []);
+      senderGroups.get(key)!.push(email);
+    }
+
+    emailThreadBriefs = await Promise.all(
+      Array.from(senderGroups.values()).map((g) => aggregateEmailThread(g))
+    );
+    console.log(`✓ Reduced to ${emailThreadBriefs.length} email thread briefs`);
+  }
+
+  // Aggregate channel messages into a short context string if present
+  let channelContext: string | undefined;
+  if (context.context.channelMessages && context.context.channelMessages.length > 0) {
+    channelContext = context.context.channelMessages
+      .slice(0, 10)
+      .map((m) => {
+        const author = m.from?.user?.displayName || 'Unknown';
+        const text = m.body.content.replace(/<[^>]*>/g, '').slice(0, 300); // strip HTML, cap length
+        return `${author}: ${text}`;
+      })
+      .join('\n');
+  }
+
+  // ============================================
+  // Step 4: Generate Comprehensive Preparation Brief
   // ============================================
   console.log('⚙️ Generating comprehensive preparation brief...');
 
@@ -209,20 +308,15 @@ export async function generateMeetingPreparations(
       date: context.meeting.startDateTime,
       attendees: context.context.attendeeInfo.map((a) => a.displayName || ''),
     },
-    relatedMeetingSummaries: meetingSummaries.map((m) => ({
-      subject: m.subject,
-      date: context.context.relatedMeetings.find((rm) => rm.id === m.meetingId)?.startDateTime || '',
-      summary: m.summary,
-    })),
-    relatedEmailSummaries: emailSummaries.map((e) => ({
-      subject: e.subject,
-      from: e.summary.from,
-      date: e.summary.date,
-      summary: e.summary,
-    })),
+    relatedMeetingSummaries: rawMeetingSummaries,
+    relatedEmailSummaries: rawEmailSummaries,
+    meetingThreadBriefs,
+    emailThreadBriefs,
+    channelContext,
   };
 
-  const brief = await createPreparationBrief(briefInput);
+  const briefResult = await createPreparationBrief(briefInput);
+  const brief = briefResult.brief;
 
   const processingTimeMs = Date.now() - startTime;
 
@@ -232,6 +326,9 @@ export async function generateMeetingPreparations(
     emailsProcessed: emailSummaries.length,
     cached: meetingsCached + emailsCached,
     generated: meetingsGenerated + emailsGenerated,
+    briefTokens: briefResult.tokenUsage.totalTokens,
+    reducedMeetingThreads: meetingThreadBriefs?.length ?? 0,
+    reducedEmailThreads: emailThreadBriefs?.length ?? 0,
   });
 
   return {
@@ -246,6 +343,9 @@ export async function generateMeetingPreparations(
       emailsCached,
       emailsGenerated,
       processingTimeMs,
+      briefTokenUsage: briefResult.tokenUsage,
+      reducedMeetingThreads: meetingThreadBriefs?.length ?? 0,
+      reducedEmailThreads: emailThreadBriefs?.length ?? 0,
     },
   };
 }

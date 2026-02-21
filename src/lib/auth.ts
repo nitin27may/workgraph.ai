@@ -79,6 +79,12 @@ export const authOptions: NextAuthOptions = {
             // Files
             "Files.Read",
             "Files.ReadWrite",
+            // OneNote
+            "Notes.ReadWrite",
+            // Teams (teams & channels — requires re-authentication)
+            "Team.ReadBasic.All",
+            "Channel.ReadBasic.All",
+            "ChannelMessage.Read.All",
           ].join(" "),
         },
       },

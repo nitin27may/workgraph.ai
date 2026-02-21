@@ -34,7 +34,13 @@ export const GET = withAuth(async (request: NextRequest, session) => {
               meetings: enhancedPrep.meetingSummaries,
               emails: enhancedPrep.emailSummaries,
             },
-            stats: enhancedPrep.stats,
+            stats: {
+              ...enhancedPrep.stats,
+              // Surface brief token usage for the usage tab in the UI
+              briefTokenUsage: enhancedPrep.stats.briefTokenUsage,
+              reducedMeetingThreads: enhancedPrep.stats.reducedMeetingThreads,
+              reducedEmailThreads: enhancedPrep.stats.reducedEmailThreads,
+            },
           });
         }
 
