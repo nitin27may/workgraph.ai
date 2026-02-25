@@ -88,6 +88,30 @@ export const shareTaskSchema = z.object({
   importance: z.enum(["low", "normal", "high"]).optional().default("normal"),
 });
 
+// ============ Planner Tasks ============
+
+export const createPlannerTaskSchema = z.object({
+  title: z.string().min(1, "Title is required").max(500),
+  planId: z.string().min(1, "Plan ID is required"),
+  bucketId: z.string().optional(),
+  body: z.string().max(5000).optional(),
+  dueDateTime: z.string().optional(),
+  priority: z.number().int().min(0).max(10).optional(),
+  assigneeIds: z.array(z.string()).optional(),
+});
+
+export const batchCreatePlannerTasksSchema = z.object({
+  tasks: z.array(z.object({
+    title: z.string().min(1).max(500),
+    planId: z.string().min(1),
+    bucketId: z.string().optional(),
+    body: z.string().max(5000).optional(),
+    dueDateTime: z.string().optional(),
+    priority: z.number().int().min(0).max(10).optional(),
+    assigneeIds: z.array(z.string()).optional(),
+  })).min(1).max(50),
+});
+
 // ============ Users ============
 
 export const createUserSchema = z.object({

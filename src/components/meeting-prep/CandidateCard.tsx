@@ -15,6 +15,8 @@ interface CandidateCardProps {
   type: 'meeting' | 'email' | 'team' | 'file';
   onToggle: (id: string, selected: boolean) => void;
   additionalInfo?: React.ReactNode;
+  /** Custom icon element to replace the default type-based icon */
+  customIcon?: React.ReactNode;
 }
 
 export function CandidateCard({
@@ -27,6 +29,7 @@ export function CandidateCard({
   type,
   onToggle,
   additionalInfo,
+  customIcon,
 }: CandidateCardProps) {
   // Determine score badge color based on relevance
   const getScoreBadgeVariant = (score: number) => {
@@ -92,7 +95,7 @@ export function CandidateCard({
 
             {/* Metadata */}
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {getIcon()}
+              {customIcon || getIcon()}
               <span className="line-clamp-1">{metadata}</span>
             </div>
 

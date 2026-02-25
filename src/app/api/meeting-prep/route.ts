@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { withAuth } from "@/lib/api-auth";
-import { 
-  getMeetingPrepContext, 
+import {
+  getMeetingPrepContext,
   getUpcomingMeetings,
   getMessage,
   getCalendarEvent,
   getChannelMessages,
   getOnlineMeetingTranscript,
+  getDriveItem,
   type EmailMessage,
   type ChannelMessage
 } from "@/lib/graph";
@@ -285,14 +286,22 @@ export async function POST(request: NextRequest) {
           ).then((results) => results.filter((t) => t !== null))
         : Promise.resolve([]),
 
-      // Fetch selected files (metadata only for now)
+      // Fetch selected file metadata
       selections.fileIds && selections.fileIds.length > 0
         ? Promise.all(
             selections.fileIds.map(async (id: string) => {
               try {
-                // For now, just return file metadata
-                // In the future, we can extract content from text-based files
-                return { id, name: `File ${id}` }; // Placeholder
+                const item = await getDriveItem(accessToken, id);
+                if (!item) return { id, name: `File ${id}` };
+                return {
+                  id: item.id,
+                  name: item.name,
+                  webUrl: item.webUrl,
+                  lastModifiedDateTime: item.lastModifiedDateTime,
+                  size: item.size,
+                  mimeType: item.file?.mimeType,
+                  owner: item.createdBy?.user?.displayName,
+                };
               } catch (err) {
                 console.error(`Error fetching file ${id}:`, err);
                 return null;
@@ -302,11 +311,21 @@ export async function POST(request: NextRequest) {
         : Promise.resolve([]),
     ]);
 
+    // Build document context string from selected file metadata
+    const documentContext = selectedFiles.length > 0
+      ? selectedFiles
+          .map((f: any, i: number) =>
+            `Document ${i + 1}: ${f.name}${f.mimeType ? ` (${f.mimeType})` : ""}${f.owner ? ` | Owner: ${f.owner}` : ""}${f.lastModifiedDateTime ? ` | Modified: ${new Date(f.lastModifiedDateTime).toLocaleDateString()}` : ""}${f.webUrl ? ` | URL: ${f.webUrl}` : ""}`
+          )
+          .join("\n")
+      : undefined;
+
     console.log(`✅ Fetched selected content:`, {
       meetings: selectedMeetings.length,
       emails: selectedEmails.length,
       teamChannels: selectedTeamMessages.length,
       files: selectedFiles.length,
+      hasDocumentContext: !!documentContext,
     });
 
     // Convert CalendarEventDetailed to Meeting type
@@ -353,6 +372,7 @@ export async function POST(request: NextRequest) {
         topKeywords: [],
         confidence: 'high' as const,
       },
+      documentContext,
     };
 
     // Generate preparation using the pipeline

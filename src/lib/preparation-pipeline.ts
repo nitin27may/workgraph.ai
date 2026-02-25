@@ -344,6 +344,7 @@ export async function generateMeetingPreparations(
     meetingThreadBriefs,
     emailThreadBriefs,
     channelContext,
+    documentContext: (context as any).documentContext,
   };
 
   // Estimate total tokens for context

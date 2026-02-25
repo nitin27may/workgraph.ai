@@ -96,8 +96,32 @@ export {
   getSharedFiles,
   createFolder,
   deleteDriveItem,
+  // Smart Document Discovery
+  getTrendingDocuments,
+  getUsedDocuments,
+  getSharedDocuments,
+  searchGraphContent,
+  normalizeInsightToDocument,
+  normalizeDriveItemToDocument,
+  normalizeSearchHitToDocument,
+  deduplicateDocuments,
 } from "./files";
-export type { DriveItem, Drive } from "./files";
+export type {
+  DriveItem,
+  Drive,
+  DocumentSource,
+  DiscoveredDocument,
+  GraphSearchHit,
+  InsightResource,
+} from "./files";
+
+export {
+  getPlannerPlans,
+  getPlannerBuckets,
+  createPlannerTask,
+  createMultiplePlannerTasks,
+  importanceToPlannerPriority,
+} from "./planner";
 
 export { getDailyDigest } from "./digest";
 export type { DailyDigest, ActionItem } from "./digest";

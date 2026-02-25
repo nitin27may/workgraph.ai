@@ -55,6 +55,7 @@ import { Separator } from "@/components/ui/separator";
 import { parseUTCDateTime, formatMeetingDateTime } from "@/lib/dateUtils";
 import { formatSummaryAsMarkdown, formatSummaryAsHtml } from "@/lib/summaryUtils";
 import { OneNoteSaveDialog, type OneNoteSavePayload } from "@/components/OneNoteSaveDialog";
+import { TaskDestinationDialog, type TaskDestinationPayload } from "@/components/TaskDestinationDialog";
 
 export default function MeetingsPage() {
   const { data: session, status } = useSession();
@@ -87,6 +88,9 @@ export default function MeetingsPage() {
   // Task creation state
   const [selectedActionItems, setSelectedActionItems] = useState<Record<string, Set<number>>>({});
   const [creatingTasks, setCreatingTasks] = useState<string | null>(null);
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  const [taskDialogPayload, setTaskDialogPayload] = useState<TaskDestinationPayload | null>(null);
+  const [taskDialogMeetingKey, setTaskDialogMeetingKey] = useState<string | null>(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareEmail, setShareEmail] = useState("");
   const [shareSubject, setShareSubject] = useState("");
@@ -285,46 +289,27 @@ export default function MeetingsPage() {
     });
   }
 
-  // Create tasks from selected action items
-  async function createTasksFromActionItems(meetingKey: string, summary: MeetingSummary) {
+  // Open task destination dialog for selected action items
+  function createTasksFromActionItems(meetingKey: string, summary: MeetingSummary) {
     const selected = selectedActionItems[meetingKey];
     if (!selected || selected.size === 0) {
       toast.error("Please select at least one action item");
       return;
     }
 
-    setCreatingTasks(meetingKey);
+    const tasksToCreate = summary.actionItems
+      .filter((_, index) => selected.has(index))
+      .map(item => ({
+        title: `${item.owner}: ${item.task}`,
+        body: item.deadline ? `Due: ${item.deadline}` : undefined,
+      }));
 
-    try {
-      const tasksToCreate = summary.actionItems
-        .filter((_, index) => selected.has(index))
-        .map(item => ({
-          title: `${item.owner}: ${item.task}`,
-          body: item.deadline ? `Due: ${item.deadline}` : undefined,
-          meetingSubject: summary.subject,
-        }));
-
-      const response = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tasks: tasksToCreate }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to create tasks");
-      }
-
-      const result = await response.json();
-      toast.success(`Created ${result.created.length} task(s) in Microsoft To Do`);
-      
-      // Clear selection after successful creation
-      setSelectedActionItems(prev => ({ ...prev, [meetingKey]: new Set<number>() }));
-    } catch (error) {
-      console.error("Error creating tasks:", error);
-      toast.error("Failed to create tasks");
-    } finally {
-      setCreatingTasks(null);
-    }
+    setTaskDialogPayload({
+      tasks: tasksToCreate,
+      meetingSubject: summary.subject,
+    });
+    setTaskDialogMeetingKey(meetingKey);
+    setTaskDialogOpen(true);
   }
 
   // Share a task with another user
@@ -477,8 +462,8 @@ export default function MeetingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           taskTitle: shareSummarySubject || `Meeting Summary: ${summary.subject}`,
-          taskBody: summaryHtml,
-          taskBodyHtml: true,
+          taskBody: "",
+          taskBodyHtml: summaryHtml,
           recipientEmail: recipients[0],
           ccRecipients: recipients.slice(1),
           meetingSubject: summary.subject,
@@ -1427,6 +1412,19 @@ export default function MeetingsPage() {
           payload={oneNotePayload}
           title={oneNoteDialogTitle}
           description={oneNoteDialogDesc}
+        />
+        <TaskDestinationDialog
+          open={taskDialogOpen}
+          onOpenChange={setTaskDialogOpen}
+          payload={taskDialogPayload}
+          onComplete={() => {
+            // Clear selection after successful creation
+            if (taskDialogMeetingKey) {
+              setSelectedActionItems(prev => ({ ...prev, [taskDialogMeetingKey]: new Set<number>() }));
+            }
+            setTaskDialogMeetingKey(null);
+            setTaskDialogPayload(null);
+          }}
         />
       </main>
     </div>

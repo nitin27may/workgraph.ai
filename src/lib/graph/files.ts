@@ -1,5 +1,236 @@
 import { getGraphClient } from "./client";
 
+// ============ Document Discovery Types ============
+
+export type DocumentSource = "trending" | "used" | "shared" | "search" | "recent";
+
+export interface InsightResource {
+  id: string;
+  webUrl: string;
+  type?: string;
+}
+
+export interface DiscoveredDocument {
+  id: string;
+  name: string;
+  webUrl: string;
+  lastModifiedDateTime?: string;
+  size?: number;
+  mimeType?: string;
+  owner?: string;
+  containerName?: string;
+  /** Graph containerType: OneDriveBusiness, Site, Mail, DropBox, Box, GDrive */
+  containerType?: string;
+  source: DocumentSource;
+}
+
+export interface GraphSearchHit {
+  hitId: string;
+  rank: number;
+  summary?: string;
+  resource: {
+    id: string;
+    name: string;
+    webUrl: string;
+    lastModifiedDateTime?: string;
+    size?: number;
+    file?: { mimeType: string };
+    createdBy?: { user?: { displayName: string } };
+    parentReference?: { name?: string; siteId?: string };
+  };
+}
+
+// ============ Normalization Helpers ============
+
+export function normalizeInsightToDocument(
+  insight: any,
+  source: DocumentSource
+): DiscoveredDocument | null {
+  const resource = insight.resourceReference || {};
+  const resourceVisualization = insight.resourceVisualization || {};
+
+  if (!resource.id && !resource.webUrl) return null;
+
+  return {
+    id: resource.id || resourceVisualization.title || "",
+    name: resourceVisualization.title || "Untitled",
+    webUrl: resource.webUrl || "",
+    lastModifiedDateTime: undefined,
+    size: undefined,
+    mimeType: resourceVisualization.type || resourceVisualization.mediaType || undefined,
+    owner: undefined,
+    containerName: resourceVisualization.containerDisplayName || undefined,
+    containerType: resourceVisualization.containerType || undefined,
+    source,
+  };
+}
+
+export function normalizeDriveItemToDocument(
+  item: DriveItem,
+  source: DocumentSource = "recent"
+): DiscoveredDocument {
+  return {
+    id: item.id,
+    name: item.name,
+    webUrl: item.webUrl,
+    lastModifiedDateTime: item.lastModifiedDateTime,
+    size: item.size,
+    mimeType: item.file?.mimeType || undefined,
+    owner: item.createdBy?.user?.displayName || undefined,
+    containerName: undefined,
+    source,
+  };
+}
+
+export function normalizeSearchHitToDocument(hit: GraphSearchHit): DiscoveredDocument {
+  const r = hit.resource;
+  return {
+    id: r.id || hit.hitId,
+    name: r.name || "Untitled",
+    webUrl: r.webUrl || "",
+    lastModifiedDateTime: r.lastModifiedDateTime,
+    size: r.size,
+    mimeType: r.file?.mimeType || undefined,
+    owner: r.createdBy?.user?.displayName || undefined,
+    containerName: r.parentReference?.name || undefined,
+    source: "search",
+  };
+}
+
+export function deduplicateDocuments(docs: DiscoveredDocument[]): DiscoveredDocument[] {
+  const sourcePriority: Record<DocumentSource, number> = {
+    trending: 1,
+    shared: 2,
+    search: 3,
+    used: 4,
+    recent: 5,
+  };
+
+  const seen = new Map<string, DiscoveredDocument>();
+  for (const doc of docs) {
+    const key = doc.webUrl || doc.id;
+    if (!key) continue;
+    const existing = seen.get(key);
+    if (!existing || sourcePriority[doc.source] < sourcePriority[existing.source]) {
+      seen.set(key, doc);
+    }
+  }
+  return Array.from(seen.values());
+}
+
+// ============ Insight API Functions ============
+
+export async function getTrendingDocuments(
+  accessToken: string,
+  top: number = 50
+): Promise<DiscoveredDocument[]> {
+  const client = getGraphClient(accessToken);
+
+  try {
+    const response = await client
+      .api("/me/insights/trending")
+      .top(top)
+      .get();
+
+    return (response.value || [])
+      .map((item: any) => normalizeInsightToDocument(item, "trending"))
+      .filter((d: DiscoveredDocument | null): d is DiscoveredDocument => d !== null);
+  } catch (error) {
+    console.error("Error fetching trending documents:", error);
+    return [];
+  }
+}
+
+export async function getUsedDocuments(
+  accessToken: string,
+  top: number = 50
+): Promise<DiscoveredDocument[]> {
+  const client = getGraphClient(accessToken);
+
+  try {
+    const response = await client
+      .api("/me/insights/used")
+      .top(top)
+      .get();
+
+    return (response.value || [])
+      .map((item: any) => normalizeInsightToDocument(item, "used"))
+      .filter((d: DiscoveredDocument | null): d is DiscoveredDocument => d !== null)
+      // Filter out web bookmarks - only keep actual documents
+      .filter((d: DiscoveredDocument) => {
+        const mimeType = d.mimeType?.toLowerCase() || "";
+        return !mimeType.includes("bookmark") && !mimeType.includes("link");
+      });
+  } catch (error) {
+    console.error("Error fetching used documents:", error);
+    return [];
+  }
+}
+
+export async function getSharedDocuments(
+  accessToken: string,
+  top: number = 50
+): Promise<DiscoveredDocument[]> {
+  const client = getGraphClient(accessToken);
+
+  try {
+    const response = await client
+      .api("/me/insights/shared")
+      .top(top)
+      .get();
+
+    return (response.value || [])
+      .map((item: any) => normalizeInsightToDocument(item, "shared"))
+      .filter((d: DiscoveredDocument | null): d is DiscoveredDocument => d !== null);
+  } catch (error) {
+    console.error("Error fetching shared documents:", error);
+    return [];
+  }
+}
+
+export async function searchGraphContent(
+  accessToken: string,
+  query: string,
+  options?: { top?: number; entityTypes?: string[] }
+): Promise<DiscoveredDocument[]> {
+  const client = getGraphClient(accessToken);
+  const top = options?.top ?? 25;
+  const entityTypes = options?.entityTypes ?? ["driveItem", "listItem"];
+
+  if (!query.trim()) return [];
+
+  try {
+    const response = await client
+      .api("/search/query")
+      .post({
+        requests: [
+          {
+            entityTypes,
+            query: { queryString: query },
+            from: 0,
+            size: top,
+          },
+        ],
+      });
+
+    const hits: DiscoveredDocument[] = [];
+    for (const result of response.value || []) {
+      for (const hitContainer of result.hitsContainers || []) {
+        for (const hit of hitContainer.hits || []) {
+          const doc = normalizeSearchHitToDocument(hit);
+          hits.push(doc);
+        }
+      }
+    }
+    return hits;
+  } catch (error) {
+    console.error("Error searching graph content:", error);
+    return [];
+  }
+}
+
+// ============ Existing Types ============
+
 export interface DriveItem {
   id: string;
   name: string;

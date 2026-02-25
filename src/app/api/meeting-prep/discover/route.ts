@@ -14,6 +14,16 @@ import {
   type Team,
   type TeamChannel,
 } from "@/lib/graph";
+import {
+  getTrendingDocuments,
+  getUsedDocuments,
+  getSharedDocuments,
+  searchGraphContent,
+  deduplicateDocuments,
+  normalizeDriveItemToDocument,
+  type DiscoveredDocument,
+  type DocumentSource,
+} from "@/lib/graph/files";
 import { classifyRelevance } from "@/lib/openai";
 import { getDiscoveryCache, saveDiscoveryCache } from "@/lib/db";
 
@@ -77,6 +87,9 @@ interface FileCandidate {
   owner?: string;
   size?: number;
   reasoning: string;
+  source?: DocumentSource;
+  containerName?: string;
+  mimeType?: string;
 }
 
 export async function GET(request: NextRequest) {
@@ -136,9 +149,12 @@ export async function GET(request: NextRequest) {
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
+    // Build search query from meeting title + user keywords
+    const searchQuery = [targetTitle, keywords].filter(Boolean).join(" ");
+
     // Fetch candidates from all sources in parallel
     console.log(`⚡ Fetching candidates from all sources (last 30 days)...`);
-    const [rawMeetings, rawEmails, rawTeams, rawFiles] = await Promise.all([
+    const [rawMeetings, rawEmails, rawTeams, rawRecentFiles, trendingDocs, usedDocs, sharedDocs, searchDocs] = await Promise.all([
       // Meetings from last 30 days
       getUserMeetings(accessToken, {
         startDate: thirtyDaysAgo.toISOString(),
@@ -174,12 +190,40 @@ export async function GET(request: NextRequest) {
         return [];
       }),
 
-      // OneDrive files modified in last 30 days
+      // OneDrive recent files
       getRecentFiles(accessToken, 100).catch((err) => {
-        console.error("Error fetching files:", err);
+        console.error("Error fetching recent files:", err);
         return [];
       }),
+
+      // Trending documents (Insights API)
+      getTrendingDocuments(accessToken, 50),
+
+      // Recently used documents (Insights API)
+      getUsedDocuments(accessToken, 50),
+
+      // Shared documents (Insights API)
+      getSharedDocuments(accessToken, 50),
+
+      // Graph Search content
+      searchGraphContent(accessToken, searchQuery, { top: 25 }),
     ]);
+
+    // Normalize recent files to DiscoveredDocument format and merge all file sources
+    const recentDocs = rawRecentFiles.map((f) => normalizeDriveItemToDocument(f, "recent"));
+    const allDocuments = deduplicateDocuments([
+      ...trendingDocs,
+      ...sharedDocs,
+      ...searchDocs,
+      ...usedDocs,
+      ...recentDocs,
+    ]);
+
+    // Count documents by source for stats
+    const fileSources: Record<string, number> = {};
+    for (const doc of allDocuments) {
+      fileSources[doc.source] = (fileSources[doc.source] || 0) + 1;
+    }
 
     // Filter meetings (exclude the target meeting)
     const filteredMeetings = rawMeetings.filter((m) => m.id !== meetingId);
@@ -190,7 +234,7 @@ export async function GET(request: NextRequest) {
     // Filter emails with valid from data before classification
     const validEmails = deduplicatedEmails.filter((e) => e.from && e.from.emailAddress);
 
-    console.log(`📊 Fetched: ${filteredMeetings.length} meetings, ${validEmails.length} emails (deduplicated from ${rawEmails.length}), ${rawTeams.length} teams, ${rawFiles.length} files`);
+    console.log(`📊 Fetched: ${filteredMeetings.length} meetings, ${validEmails.length} emails (deduplicated from ${rawEmails.length}), ${rawTeams.length} teams, ${allDocuments.length} files (${Object.entries(fileSources).map(([k,v]) => `${k}:${v}`).join(', ')})`);
 
     // Classify relevance using GPT in parallel
     console.log(`🤖 Classifying relevance with GPT...`);
@@ -235,13 +279,13 @@ export async function GET(request: NextRequest) {
             )
           : Promise.resolve([]),
 
-        rawFiles.length > 0
+        allDocuments.length > 0
           ? classifyRelevance(
               targetTitle,
-              rawFiles.map((f) => ({
+              allDocuments.map((f) => ({
                 id: f.id,
                 title: f.name || "Unnamed File",
-                metadata: `Modified: ${f.lastModifiedDateTime ? new Date(f.lastModifiedDateTime).toLocaleDateString() : "Unknown"}`,
+                metadata: `Source: ${f.source}${f.containerName ? ` | Container: ${f.containerName}` : ""}${f.owner ? ` | Owner: ${f.owner}` : ""}${f.lastModifiedDateTime ? ` | Modified: ${new Date(f.lastModifiedDateTime).toLocaleDateString()}` : ""}`,
               })),
               "files",
               keywords
@@ -295,7 +339,7 @@ export async function GET(request: NextRequest) {
     );
     const boostedFileScores = applyKeywordBoost(
       fileScores,
-      rawFiles.map(f => ({ id: f.id, title: f.name || "" }))
+      allDocuments.map(f => ({ id: f.id, title: f.name || "" }))
     );
 
     console.log(`🔑 Applied keyword boost to ${keywordList.length} keywords: ${keywordList.join(', ')}`);
@@ -383,23 +427,26 @@ export async function GET(request: NextRequest) {
     );
     teamCandidates.sort((a, b) => b.score - a.score);
 
-    // Build file candidates - filter out files with missing required fields
-    const fileCandidates: FileCandidate[] = rawFiles
-      .filter((file) => file.id && file.name)
-      .map((file) => {
-        const score = boostedFileScores.find((s) => s.id === file.id)?.score || 0;
+    // Build file candidates from deduplicated documents
+    const fileCandidates: FileCandidate[] = allDocuments
+      .filter((doc) => doc.id && doc.name)
+      .map((doc) => {
+        const score = boostedFileScores.find((s) => s.id === doc.id)?.score || 0;
         const reasoning =
-          boostedFileScores.find((s) => s.id === file.id)?.reasoning || "";
+          boostedFileScores.find((s) => s.id === doc.id)?.reasoning || "";
         return {
-          id: file.id,
-          name: file.name || "Unnamed File",
-          path: (file as any).webUrl || file.name || "",
-          modifiedTime: file.lastModifiedDateTime || "",
+          id: doc.id,
+          name: doc.name || "Unnamed File",
+          path: doc.webUrl || doc.name || "",
+          modifiedTime: doc.lastModifiedDateTime || "",
           score,
           autoSelected: score >= 70,
-          owner: (file as any).createdBy?.user?.displayName || undefined,
-          size: file.size,
+          owner: doc.owner || undefined,
+          size: doc.size,
           reasoning,
+          source: doc.source,
+          containerName: doc.containerName,
+          mimeType: doc.mimeType,
         };
       })
       .sort((a, b) => b.score - a.score);
@@ -430,6 +477,7 @@ export async function GET(request: NextRequest) {
         totalTeams: teamCandidates.length,
         totalFiles: fileCandidates.length,
         autoSelectedCount,
+        fileSources,
       },
       cached: false,
       keywordsApplied: !!keywords,

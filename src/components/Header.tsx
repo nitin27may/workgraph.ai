@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LogOut, User, ChevronDown, BarChart3, Users, Settings, Calendar, Sparkles } from "lucide-react";
+import { LogOut, User, ChevronDown, BarChart3, Users, Settings, Calendar, Sparkles, FileText } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -74,6 +74,16 @@ export function Header() {
                 <Calendar className="h-4 w-4" />
                 Meetings
               </Link>
+              <Link
+                href="/documents"
+                aria-current={pathname === "/documents" ? "page" : undefined}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted ${
+                  pathname === "/documents" ? "bg-muted text-foreground" : "text-muted-foreground"
+                }`}
+              >
+                <FileText className="h-4 w-4" />
+                Documents
+              </Link>
             </nav>
           )}
         </div>
@@ -118,6 +128,12 @@ export function Header() {
                     <Link href="/meetings" className="flex items-center gap-2 cursor-pointer">
                       <Calendar className="h-4 w-4" />
                       Meetings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/documents" className="flex items-center gap-2 cursor-pointer">
+                      <FileText className="h-4 w-4" />
+                      Documents
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />

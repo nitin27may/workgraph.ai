@@ -10,7 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CandidateCard } from "./CandidateCard";
-import { AlertCircle, Loader2, Calendar, Mail, Users, File, Search, Sparkles } from "lucide-react";
+import { AlertCircle, Loader2, Calendar, Mail, Users, File, Search, Sparkles, TrendingUp, Clock, Share2, FileText } from "lucide-react";
+import { getFileTypeInfo, detectFileOrigin, ORIGIN_CONFIG } from "@/lib/file-utils";
+import { FileTypeIcon } from "@/components/FileTypeIcon";
 
 interface DiscoveryPanelProps {
   meetingId: string;
@@ -60,6 +62,8 @@ interface ChannelCandidate {
   selected: boolean;
 }
 
+type DocumentSource = "trending" | "used" | "shared" | "search" | "recent";
+
 interface FileCandidate {
   id: string;
   name: string;
@@ -70,6 +74,9 @@ interface FileCandidate {
   owner?: string;
   size?: number;
   reasoning: string;
+  source?: DocumentSource;
+  containerName?: string;
+  mimeType?: string;
 }
 
 interface DiscoveryData {
@@ -91,6 +98,7 @@ interface DiscoveryData {
     totalTeams: number;
     totalFiles: number;
     autoSelectedCount: number;
+    fileSources?: Record<string, number>;
   };
   cached?: boolean;
   processingTimeMs?: number;
@@ -112,6 +120,7 @@ export function DiscoveryPanel({ meetingId, onGenerate }: DiscoveryPanelProps) {
   const [selectedTeamChannels, setSelectedTeamChannels] = useState<Set<string>>(new Set());
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [multiStageSummary, setMultiStageSummary] = useState(false);
+  const [fileSourceFilter, setFileSourceFilter] = useState<DocumentSource | "all">("all");
 
   // Fetch discovery data function
   const fetchDiscovery = async (keywordsToUse?: string) => {
@@ -600,25 +609,100 @@ export function DiscoveryPanel({ meetingId, onGenerate }: DiscoveryPanelProps) {
             </div>
           </div>
 
+          {/* Source filter buttons */}
+          {data.stats.fileSources && Object.keys(data.stats.fileSources).length > 1 && (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={fileSourceFilter === "all" ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setFileSourceFilter("all")}
+              >
+                All ({data.candidates.files.length})
+              </Button>
+              {(["trending", "used", "shared", "search", "recent"] as const).map((source) => {
+                const count = data.stats.fileSources?.[source] || 0;
+                if (count === 0) return null;
+                const sourceConfig = {
+                  trending: { icon: TrendingUp, label: "Trending" },
+                  used: { icon: Clock, label: "Recently Used" },
+                  shared: { icon: Share2, label: "Shared" },
+                  search: { icon: Search, label: "Search Match" },
+                  recent: { icon: FileText, label: "Recent" },
+                } as const;
+                const config = sourceConfig[source];
+                const Icon = config.icon;
+                return (
+                  <Button
+                    key={source}
+                    variant={fileSourceFilter === source ? "default" : "outline"}
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setFileSourceFilter(source)}
+                  >
+                    <Icon className="mr-1 h-3 w-3" />
+                    {config.label} ({count})
+                  </Button>
+                );
+              })}
+            </div>
+          )}
+
           {data.candidates.files.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
-              No relevant files found modified in the last 30 days
+              No relevant files found
             </p>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
-              {data.candidates.files.map((file) => (
-                <CandidateCard
-                  key={file.id}
-                  id={file.id}
-                  title={file.name}
-                  metadata={`Modified: ${new Date(file.modifiedTime).toLocaleDateString()}${file.owner ? ` by ${file.owner}` : ''}`}
-                  score={file.score}
-                  selected={selectedFiles.has(file.id)}
-                  reasoning={file.reasoning}
-                  type="file"
-                  onToggle={toggleFile}
-                />
-              ))}
+              {data.candidates.files
+                .filter((file) => fileSourceFilter === "all" || file.source === fileSourceFilter)
+                .map((file) => {
+                  const sourceConfig: Record<string, { icon: typeof TrendingUp; label: string; className: string }> = {
+                    trending: { icon: TrendingUp, label: "Trending", className: "bg-info/10 text-info border-info/20" },
+                    used: { icon: Clock, label: "Recently Used", className: "bg-muted text-muted-foreground border-border" },
+                    shared: { icon: Share2, label: "Shared", className: "bg-accent text-accent-foreground border-accent/30" },
+                    search: { icon: Search, label: "Search Match", className: "bg-warning/10 text-warning border-warning/20" },
+                    recent: { icon: FileText, label: "Recent", className: "bg-success/10 text-success border-success/20" },
+                  };
+                  const config = file.source ? sourceConfig[file.source] : null;
+                  const SourceIcon = config?.icon;
+
+                  // File type icon with color
+                  const typeInfo = getFileTypeInfo(file.mimeType, file.name);
+
+                  // File origin (OneDrive / SharePoint / Teams)
+                  const origin = detectFileOrigin(file.path);
+                  const OriginIcon = ORIGIN_CONFIG[origin].icon;
+
+                  return (
+                    <CandidateCard
+                      key={file.id}
+                      id={file.id}
+                      title={file.name}
+                      metadata={`${file.containerName ? `in ${file.containerName}` : ""}${file.owner ? `${file.containerName ? " · " : ""}${file.owner}` : ""}`}
+                      score={file.score}
+                      selected={selectedFiles.has(file.id)}
+                      reasoning={file.reasoning}
+                      type="file"
+                      onToggle={toggleFile}
+                      customIcon={<FileTypeIcon typeInfo={typeInfo} size="sm" />}
+                      additionalInfo={
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge variant="outline" className="text-xs font-normal gap-1">
+                            <OriginIcon className="h-3 w-3" />
+                            {ORIGIN_CONFIG[origin].label}
+                          </Badge>
+                          {config && SourceIcon && (
+                            <Badge variant="outline" className={`text-xs font-normal ${config.className}`}>
+                              <SourceIcon className="mr-1 h-3 w-3" />
+                              {config.label}
+                            </Badge>
+                          )}
+                        </div>
+                      }
+                    />
+                  );
+                })}
             </div>
           )}
         </TabsContent>

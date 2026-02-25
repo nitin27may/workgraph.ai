@@ -11,4 +11,5 @@ export const TEMPERATURE_PREP = 0.4;
 // External URLs
 // ============================================
 export const MICROSOFT_TODO_URL = "https://to-do.office.com/tasks/inbox";
+export const MICROSOFT_PLANNER_URL = "https://tasks.office.com";
 export const OUTLOOK_URL = "https://outlook.office.com/mail";

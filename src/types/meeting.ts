@@ -145,3 +145,41 @@ export interface TaskActionItem {
   deadline?: string;
   selected?: boolean;
 }
+
+// ============ Planner Types ============
+
+export type TaskDestination = "todo" | "planner";
+
+export interface PlannerPlan {
+  id: string;
+  title: string;
+  owner: string;
+  createdDateTime: string;
+}
+
+export interface PlannerBucket {
+  id: string;
+  name: string;
+  planId: string;
+}
+
+export interface PlannerTask {
+  id: string;
+  planId: string;
+  bucketId?: string;
+  title: string;
+  percentComplete: number;
+  priority: number;
+  dueDateTime?: string;
+  assignments?: Record<string, { orderHint: string }>;
+}
+
+export interface CreatePlannerTaskRequest {
+  title: string;
+  planId: string;
+  bucketId?: string;
+  body?: string;
+  dueDateTime?: string;
+  priority?: number;
+  assigneeIds?: string[];
+}

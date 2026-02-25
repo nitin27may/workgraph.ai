@@ -475,6 +475,7 @@ export interface PreparationBriefInput {
   meetingThreadBriefs?: string[];
   emailThreadBriefs?: string[];
   channelContext?: string; // aggregated Teams channel message context
+  documentContext?: string; // metadata about relevant documents from OneDrive/SharePoint
 }
 
 export interface PreparationBriefResult {
@@ -553,6 +554,10 @@ Be concise but comprehensive. Focus on actionable insights that will help the at
     ? `\n\n**Teams Channel Context**\n${input.channelContext}`
     : "";
 
+  const documentSection = input.documentContext
+    ? `\n\n**Relevant Documents**\n${input.documentContext}`
+    : "";
+
   const userPrompt = `Prepare a brief for this upcoming meeting:
 
 **Upcoming Meeting**
@@ -564,9 +569,9 @@ Attendees: ${input.upcomingMeeting.attendees.join(", ")}
 ${meetingContext || "No related meetings found"}
 
 **Related Emails**
-${emailContext || "No related emails found"}${channelSection}
+${emailContext || "No related emails found"}${channelSection}${documentSection}
 
-Create a comprehensive preparation brief that helps the attendee walk into this meeting fully informed.`;
+Create a comprehensive preparation brief that helps the attendee walk into this meeting fully informed.${input.documentContext ? " Include a 'Relevant Documents' section that references the documents listed above with their names and URLs." : ""}`;
 
   try {
     const model = process.env.AZURE_OPENAI_DEPLOYMENT!;

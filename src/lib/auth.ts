@@ -97,8 +97,9 @@ export const authOptions: NextAuthOptions = {
             "ChatMessage.Send",
             // Tasks
             "Tasks.ReadWrite",
-            // Files
-            "Files.Read",
+            // Files & SharePoint
+            "Files.Read.All",
+            "Sites.Read.All",
           ].join(" "),
         },
       },
